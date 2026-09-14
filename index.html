@@ -88,12 +88,13 @@
 
       <!-- 入力欄 -->
       <div id="input-row" class="hidden">
-        <input
+        <!-- 文字数に合わせて高さが伸びる（renderer.js の resizeInput） -->
+        <textarea
           id="input"
-          type="text"
+          rows="1"
           autocomplete="off"
           placeholder="話しかける…"
-        />
+        ></textarea>
       </div>
     </div>
 

@@ -2,7 +2,7 @@
 
 const { contextBridge, ipcRenderer } = require('electron');
 
-// レンダラーに渡すのはこの関数だけ。Claude の呼び出しも会話履歴もメイン側に閉じ込める。
+// レンダラーに渡すのはこの関数だけ。APIキーも会話履歴もメイン側に閉じ込める。
 contextBridge.exposeInMainWorld('mascot', {
   send: (text) => ipcRenderer.invoke('chat:send', text),
   onDelta: (callback) => {

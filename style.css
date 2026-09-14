@@ -44,6 +44,8 @@ body {
   font-size: 13px;
   line-height: 1.6;
   animation: pop 0.18s ease-out;
+  /* クリックで閉じられることが分かるように */
+  cursor: pointer;
 }
 
 /* 吹き出しのしっぽ */
@@ -232,18 +234,38 @@ body {
 }
 
 #input {
+  display: block;
   width: 100%;
   box-sizing: border-box;
   padding: 8px 12px;
   font-size: 13px;
+  line-height: 1.5;
   font-family: inherit;
   color: #2b2b2b;
   background: #fffdf8;
   border: 2px solid #3a3a3a;
-  border-radius: 999px;
+  /* 複数行になっても形が崩れないよう、完全な丸ではなく角丸にする */
+  border-radius: 18px;
   outline: none;
+  /* 高さは文字数に合わせて renderer.js が決める。上限を超えたら中でスクロール */
+  resize: none;
+  overflow-y: hidden;
 }
 
 #input:focus {
   border-color: #4aa8d8;
+}
+
+/* 4行を超えたときのスクロールバーは、角丸の入力欄に馴染むよう細くする */
+#input::-webkit-scrollbar {
+  width: 6px;
+}
+
+#input::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 3px;
+}
+
+#input::-webkit-scrollbar-button {
+  display: none;
 }

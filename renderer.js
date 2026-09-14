@@ -46,6 +46,11 @@ function hideBubble() {
   bubbleEl.classList.remove('thinking');
 }
 
+// 返事は残しておくので、クリックで閉じられるようにする（考え中は閉じない）
+bubbleEl.addEventListener('click', () => {
+  if (!busy) hideBubble();
+});
+
 // ---------------------------------------------------------------------------
 // ドラッグ移動（クリックと区別するため、動いた距離でしきい値を取る）
 // ---------------------------------------------------------------------------
@@ -89,6 +94,7 @@ window.addEventListener('mouseup', () => {
 function toggleInput() {
   if (inputRowEl.classList.contains('hidden')) {
     inputRowEl.classList.remove('hidden');
+    resizeInput();
     inputEl.focus();
   } else {
     inputRowEl.classList.add('hidden');
@@ -96,22 +102,45 @@ function toggleInput() {
   }
 }
 
+// 入力欄は文字数に合わせて縦に伸ばす。ウィンドウの高さは固定なので、
+// 吹き出しが押し出されないよう4行ぶんで止め、それ以上は中でスクロールさせる
+const INPUT_MAX_LINES = 4;
+
+function resizeInput() {
+  const style = getComputedStyle(inputEl);
+  const lineHeight = parseFloat(style.lineHeight);
+  const extra =
+    parseFloat(style.paddingTop) + parseFloat(style.paddingBottom) +
+    parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
+  const maxHeight = lineHeight * INPUT_MAX_LINES + extra;
+
+  inputEl.style.height = 'auto';
+  const contentHeight = inputEl.scrollHeight + parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
+  inputEl.style.height = `${Math.min(contentHeight, maxHeight)}px`;
+  inputEl.style.overflowY = contentHeight > maxHeight ? 'auto' : 'hidden';
+}
+
+inputEl.addEventListener('input', resizeInput);
+
 inputEl.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
     inputRowEl.classList.add('hidden');
     inputEl.blur();
     return;
   }
-  if (event.key !== 'Enter' || event.isComposing) return; // IME 変換中の Enter は無視
+  // Shift+Enter は改行、IME 変換中の Enter は変換の確定なので送らない
+  if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
+  event.preventDefault();
 
   const text = inputEl.value.trim();
   if (!text || busy) return;
   inputEl.value = '';
+  resizeInput();
   ask(text);
 });
 
 // ---------------------------------------------------------------------------
-// Claude に話しかける
+// マスコットに話しかける（返事はメインプロセスが Gemini からもらってくる）
 // ---------------------------------------------------------------------------
 let streamed = '';
 
@@ -136,8 +165,8 @@ async function ask(text) {
 
   try {
     const result = await window.mascot.send(text);
-    // ストリームで流し終わっていれば同じ内容。失敗時はエラー文が入る
-    say(result.text);
+    // 失敗時はエラー文が入る。読み返せるよう、次に話しかけるかクリックするまで残す
+    say(result.text, { keep: true });
   } finally {
     busy = false;
     streamed = '';

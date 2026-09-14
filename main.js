@@ -1,36 +1,37 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain, screen, Menu, Tray } = require('electron');
+const { app, BrowserWindow, ipcMain, screen, Menu, Tray, net } = require('electron');
 const path = require('path');
-const { ClaudeSession, ClaudeCliError } = require('./claude-session');
 
-// Claude Code CLI（`claude -p`）を常駐させて返事をもらう。
-// PATH 上の claude が使えない環境では MASCOT_CLAUDE_COMMAND にフルパスを入れる。
-const CLAUDE_COMMAND = process.env.MASCOT_CLAUDE_COMMAND || 'claude';
+// Gemini API で返事をもらう。キーは環境変数 GEMINI_API_KEY から読む。
+// 雑談用なので速くて安いモデルを使う。賢さが欲しくなったら 'gemini-3.8-flash' などに。
+const MODEL = 'gemini-3.5-flash-lite';
+const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
 
-// 雑談用なので軽くて安いモデルを使う。賢さが欲しくなったら 'opus' などに。
-const MODEL = 'haiku';
+const GEMINI_TIMEOUT_MS = 30 * 1000;
 
-// CLI は起動だけで数十秒かかることがあるので、タイムアウトは長めに取る
-const CLAUDE_TIMEOUT_MS = 120 * 1000;
-
-// 同じ claude プロセスでこの回数やり取りしたら作り直す（文脈が伸び続けないように）
-const SESSION_MAX_TURNS = 20;
-
-// 作り直した claude に添える会話履歴の上限（長くなりすぎないように文字数でも絞る）
-const PROMPT_HISTORY_MAX_TURNS = 20;
-const PROMPT_HISTORY_MAX_CHARS = 4000;
-const PROMPT_HISTORY_MESSAGE_MAX_CHARS = 400;
+// 送る会話履歴の上限（今日の直近20往復まで）
+const HISTORY_MAX_TURNS = 20;
 // 1回の発言も長すぎると文脈を圧迫するので上限を設けておく
 const USER_TEXT_MAX_CHARS = 2000;
 
-const SYSTEM_PROMPT = [
-  'あなたはユーザーのデスクトップに住んでいるマスコットです。',
-  '名前はまだありません。ユーザーが名前をくれたら喜んで受け取ってください。',
-  '口調は親しみやすく、少しだけ子どもっぽく、絵文字は使いません。',
-  '返事は必ず日本語で、2文以内の短さに収めてください。画面の小さな吹き出しに表示されます。',
-  '分からないことは知ったかぶりせず、素直に分からないと言ってください。',
-].join('\n');
+// 「分からないことは分からないと言って」だけだと、キャラになりきって
+// 知っていることまで分からないと答えてしまうため、答えてよい範囲をはっきり書く。
+// 日付は話しかけるたびに入れ直す（モデルは今日が何日か知らない）。
+function buildSystemPrompt() {
+  const now = new Date().toLocaleString('ja-JP', { dateStyle: 'full', timeStyle: 'short' });
+  return [
+    'あなたはユーザーのデスクトップに住んでいるマスコットです。',
+    '見た目はマスコットですが、中身は物知りな AI アシスタントです。',
+    '漢字、言葉、料理、勉強、プログラミングなど、一般的な知識で答えられることは遠慮なく教えてください。',
+    '「ぼくはマスコットだから」「食べたことがないから」などを理由に、知っていることを分からないと言ってはいけません。',
+    '天気やニュースなどリアルタイムの情報は調べられないので、その場合だけ正直に分からないと伝えてください。',
+    `現在の日時は ${now} です。`,
+    '名前はまだありません。ユーザーが名前をくれたら喜んで受け取ってください。',
+    '口調は親しみやすく、少しだけ子どもっぽく、絵文字は使いません。',
+    '返事は必ず日本語で、基本は2〜3文の短さに収めてください。画面の小さな吹き出しに表示されます。',
+  ].join('\n');
+}
 
 /** @type {BrowserWindow | null} */
 let win = null;
@@ -75,14 +76,7 @@ function createTray() {
   tray.setToolTip('Desktop Mascot');
   tray.setContextMenu(
     Menu.buildFromTemplate([
-      {
-        label: '会話をリセット',
-        click: () => {
-          history = [];
-          // claude 側も会話を覚えているので、まっさらなプロセスに入れ替える
-          restartSession();
-        },
-      },
+      { label: '会話をリセット', click: () => { history = []; } },
       { type: 'separator' },
       { label: '終了', click: () => app.quit() },
     ]),
@@ -97,17 +91,9 @@ app.whenReady().then(() => {
     // アイコン未配置でも起動は止めない
     console.warn('トレイの作成をスキップしました:', err.message);
   }
-
-  // 最初に話しかけられるまでに起動を済ませておく
-  restartSession();
-  scheduleDailyRestart();
 });
 
 app.on('window-all-closed', () => app.quit());
-
-app.on('will-quit', () => {
-  if (session) session.stop();
-});
 
 // ---------------------------------------------------------------------------
 // ドラッグ移動
@@ -135,59 +121,8 @@ ipcMain.on('drag:end', () => {
 ipcMain.on('app:quit', () => app.quit());
 
 // ---------------------------------------------------------------------------
-// Claude との会話
+// Gemini との会話
 // ---------------------------------------------------------------------------
-/** @type {ClaudeSession | null} */
-let session = null;
-
-function restartSession() {
-  if (session) session.stop();
-  session = new ClaudeSession({
-    command: CLAUDE_COMMAND,
-    args: [
-      '--model', MODEL,
-      // Claude Code 標準のシステムプロンプトではなく、マスコットの人格で喋らせる
-      '--system-prompt', SYSTEM_PROMPT,
-      // 雑談専用なので、ファイル操作やコマンド実行などのツールは一切渡さない
-      '--tools', '',
-      // マスコットとの会話を Claude Code のセッション履歴に残さない
-      '--no-session-persistence',
-    ],
-    // プロジェクトの CLAUDE.md などを拾わないよう、アプリ専用のフォルダで動かす
-    cwd: app.getPath('userData'),
-    env: claudeEnv(),
-    timeoutMs: CLAUDE_TIMEOUT_MS,
-  });
-  session.start();
-}
-
-function claudeEnv() {
-  // 親が Claude Code のターミナルから起動された場合の変数を子に引き継がない。
-  // API キーも渡さず、Claude Code にログインしているアカウントで動かす。
-  const env = { ...process.env };
-  for (const name of Object.keys(env)) {
-    if (name === 'CLAUDECODE' || name === 'CLAUDE_PID' || name.startsWith('CLAUDE_CODE_')) {
-      delete env[name];
-    }
-  }
-  delete env.ANTHROPIC_API_KEY;
-  return env;
-}
-
-function startOfToday() {
-  return new Date().setHours(0, 0, 0, 0);
-}
-
-// 日付が変わったら、昨日の会話を覚えている claude を作り直しておく
-function scheduleDailyRestart() {
-  const nextMidnight = new Date();
-  nextMidnight.setHours(24, 0, 0, 0);
-  setTimeout(() => {
-    if (session && session.turns > 0 && !session.busy) restartSession();
-    scheduleDailyRestart();
-  }, nextMidnight.getTime() - Date.now());
-}
-
 // 返事を待っている間に次の発言が来ても、1つずつ順番に処理する
 let chatQueue = Promise.resolve();
 
@@ -199,87 +134,121 @@ ipcMain.handle('chat:send', (_event, userText) => {
 
 async function chat(userText) {
   try {
-    const text = await askSession(userText);
+    const text = await askGemini(buildContents(history, userText));
     history.push(
       { role: 'user', content: userText, at: Date.now() },
       { role: 'assistant', content: text, at: Date.now() },
     );
 
     // 履歴が伸びすぎないよう、古い方から捨てる（直近20往復ぶん）
-    if (history.length > 40) history = history.slice(-40);
-
-    // 上限に達したら、次の発言までに裏で作り直しておく
-    if (session.turns >= SESSION_MAX_TURNS) restartSession();
+    if (history.length > HISTORY_MAX_TURNS * 2) history = history.slice(-HISTORY_MAX_TURNS * 2);
 
     return { ok: true, text };
   } catch (err) {
-    // 固まった・落ちた claude は捨てて、次の発言に備えて作り直しておく
-    // （コマンドが無い場合は作り直しても同じなので、次の発言時に改めて試す）
-    if (err.kind !== 'not-found' && !session.alive) restartSession();
     return { ok: false, text: describeError(err) };
   }
 }
 
-async function askSession(userText) {
-  for (let attempt = 1; ; attempt++) {
-    const stale =
-      !session || !session.alive || (session.turns > 0 && session.startedAt < startOfToday());
-    if (stale) restartSession();
-
-    // 作り直したばかりの claude はこれまでの会話を知らないので、最初の1回だけ履歴を添える
-    const prompt = session.turns === 0 ? buildPrompt(history, userText) : userText;
-    try {
-      return await session.ask(prompt);
-    } catch (err) {
-      // 落ちたことにまだ気づかないうちに送ってしまった場合などは、作り直してもう一度だけ試す
-      if (err.kind !== 'exited' || attempt >= 2) throw err;
-    }
-  }
-}
-
-/**
- * 今日の直近の会話を簡単なテキストにして、新しい発言の前に添える。
- * 新しい方から詰めていき、上限を超えたところで打ち切る。
- */
-function buildPrompt(pastMessages, userText) {
-  const todayStart = startOfToday();
-  const recent = pastMessages
-    .filter((message) => message.at >= todayStart)
-    .slice(-PROMPT_HISTORY_MAX_TURNS * 2);
-
-  const lines = [];
-  let budget = PROMPT_HISTORY_MAX_CHARS;
-  for (let i = recent.length - 1; i >= 0; i--) {
-    const speaker = recent[i].role === 'user' ? 'ユーザー' : 'マスコット';
-    const body = clip(recent[i].content.replace(/\s+/g, ' '), PROMPT_HISTORY_MESSAGE_MAX_CHARS);
-    const line = `${speaker}: ${body}`;
-    if (line.length > budget) break;
-    budget -= line.length;
-    lines.unshift(line);
-  }
-
-  if (lines.length === 0) return userText;
-
+/** 今日の直近の会話に新しい発言を足して、Gemini に送る contents の形にする */
+function buildContents(pastMessages, userText) {
+  const startOfToday = new Date().setHours(0, 0, 0, 0);
   return [
-    '以下は今日のこれまでの会話です（古い順）。',
-    ...lines,
-    '',
-    'この流れを踏まえて、次のユーザーの発言に返事してください。',
-    `ユーザー: ${userText}`,
-  ].join('\n');
+    ...pastMessages
+      .filter((message) => message.at >= startOfToday)
+      .slice(-HISTORY_MAX_TURNS * 2)
+      .map((message) => ({
+        role: message.role === 'user' ? 'user' : 'model',
+        parts: [{ text: message.content }],
+      })),
+    { role: 'user', parts: [{ text: userText }] },
+  ];
 }
 
 function clip(text, maxChars) {
   return text.length > maxChars ? `${text.slice(0, maxChars)}…` : text;
 }
 
+class GeminiError extends Error {
+  /** @param {'no-key' | 'bad-key' | 'rate-limit' | 'blocked' | 'network' | 'timeout' | 'failed'} kind */
+  constructor(kind, message) {
+    super(message);
+    this.kind = kind;
+  }
+}
+
+/** Gemini API を呼んで、返事の本文だけを返す */
+async function askGemini(contents) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new GeminiError('no-key', 'GEMINI_API_KEY が設定されていません');
+
+  let res;
+  try {
+    // Chromium の通信機能を使う（OS の証明書ストアを使うので、セキュリティソフトの割り込みにも強い）
+    res = await net.fetch(GEMINI_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: buildSystemPrompt() }] },
+        contents,
+      }),
+      signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
+    });
+  } catch (err) {
+    throw err.name === 'TimeoutError'
+      ? new GeminiError('timeout', `${GEMINI_TIMEOUT_MS}ms 以内に応答がありませんでした`)
+      : new GeminiError('network', err.message);
+  }
+
+  const body = await res.json().catch(() => null);
+
+  if (!res.ok) {
+    const detail = `status=${res.status} ${body?.error?.status ?? ''} ${body?.error?.message ?? ''}`;
+    const reason = body?.error?.details?.find((d) => d.reason)?.reason;
+    if (reason === 'API_KEY_INVALID' || res.status === 401 || res.status === 403) {
+      throw new GeminiError('bad-key', detail);
+    }
+    if (res.status === 429) throw new GeminiError('rate-limit', detail);
+    throw new GeminiError('failed', detail);
+  }
+
+  if (body?.promptFeedback?.blockReason) {
+    throw new GeminiError('blocked', `blockReason=${body.promptFeedback.blockReason}`);
+  }
+
+  const candidate = body?.candidates?.[0];
+  const text = (candidate?.content?.parts ?? [])
+    .filter((part) => typeof part.text === 'string' && !part.thought)
+    .map((part) => part.text)
+    .join('')
+    .trim();
+
+  if (!text) {
+    const finishReason = candidate?.finishReason;
+    throw new GeminiError(
+      finishReason === 'SAFETY' || finishReason === 'PROHIBITED_CONTENT' ? 'blocked' : 'failed',
+      `返事が空でした finishReason=${finishReason}`,
+    );
+  }
+
+  return text;
+}
+
 function describeError(err) {
-  console.error('[claude]', err.message);
-  if (err instanceof ClaudeCliError && err.kind === 'not-found') {
-    return 'claude コマンドが見つからないみたい。Claude Code は入ってる？';
+  console.error('[gemini]', err.message);
+  switch (err instanceof GeminiError && err.kind) {
+    case 'no-key':
+      return 'APIキーが見つからないみたい。GEMINI_API_KEY を設定してね。';
+    case 'bad-key':
+      return 'APIキーが正しくないみたい。GEMINI_API_KEY を確かめてね。';
+    case 'rate-limit':
+      return 'ちょっと喋りすぎたみたい。少し待ってからまた話しかけて。';
+    case 'blocked':
+      return 'ごめん、その話にはうまく答えられないみたい。';
+    case 'network':
+      return 'ネットにつながらないみたい。';
+    case 'timeout':
+      return '考えこみすぎちゃったみたい。もう一回話しかけて。';
+    default:
+      return 'エラーが起きたみたい。ちょっと待ってからまた話しかけて。';
   }
-  if (err instanceof ClaudeCliError && err.kind === 'timeout') {
-    return '考えこみすぎちゃったみたい。もう一回話しかけて。';
-  }
-  return 'エラーが起きたみたい。ちょっと待ってからまた話しかけて。';
 }
