@@ -1,0 +1,249 @@
+/* ウィンドウ全体は透過。ここに色を置くと四角い背景が見えてしまう */
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  user-select: none;
+  cursor: default;
+  font-family: "Yu Gothic UI", "Meiryo", system-ui, sans-serif;
+}
+
+#stage {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-bottom: 12px;
+  box-sizing: border-box;
+}
+
+.hidden {
+  display: none !important;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+/* --- 吹き出し ------------------------------------------------------------ */
+#bubble {
+  position: relative;
+  max-width: 260px;
+  margin-bottom: auto;
+  margin-top: 12px;
+  padding: 12px 14px;
+  background: #fffdf8;
+  color: #2b2b2b;
+  border: 2px solid #3a3a3a;
+  border-radius: 14px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  font-size: 13px;
+  line-height: 1.6;
+  animation: pop 0.18s ease-out;
+}
+
+/* 吹き出しのしっぽ */
+#bubble::after {
+  content: "";
+  position: absolute;
+  bottom: -10px;
+  left: 50%;
+  margin-left: -8px;
+  border: 8px solid transparent;
+  border-top-color: #fffdf8;
+  border-bottom: 0;
+  filter: drop-shadow(0 2px 0 #3a3a3a);
+}
+
+#bubble-text {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+#bubble.thinking #bubble-text::after {
+  content: "…";
+  animation: blink-dots 1s steps(1) infinite;
+}
+
+@keyframes pop {
+  from {
+    transform: scale(0.9);
+    opacity: 0;
+  }
+}
+
+@keyframes blink-dots {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+/* --- マスコット本体 ------------------------------------------------------ */
+#mascot {
+  position: relative;
+  width: 190px;
+  cursor: grab;
+  animation: bob 3.4s ease-in-out infinite;
+}
+
+#mascot:active {
+  cursor: grabbing;
+}
+
+#mascot-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+/* 外殻（胴体と頭） */
+#mascot-svg .shell {
+  fill: url(#shellGrad);
+  stroke: #3c211c;
+  stroke-width: 4;
+}
+
+/* 胴体の合わせ目とハイライト */
+#mascot-svg .seam {
+  fill: none;
+  stroke: rgba(0, 0, 0, 0.22);
+  stroke-width: 4;
+  stroke-linecap: round;
+}
+
+#mascot-svg .gloss {
+  fill: rgba(255, 255, 255, 0.3);
+}
+
+/* 脚まわり */
+#mascot-svg .legs path {
+  fill: none;
+  stroke: #939ca7;
+  stroke-width: 12;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+#mascot-svg .joints circle {
+  fill: #5b636d;
+}
+
+#mascot-svg .feet ellipse {
+  fill: #333a43;
+}
+
+#mascot-svg .antenna {
+  fill: none;
+  stroke: #939ca7;
+  stroke-width: 4;
+  stroke-linecap: round;
+}
+
+#mascot-svg .antenna-tip {
+  fill: #f2765e;
+  stroke: #3c211c;
+  stroke-width: 2;
+}
+
+/* 目 */
+#mascot-svg .rim {
+  fill: #263040;
+}
+
+#mascot-svg .lens {
+  fill: url(#lensGrad);
+}
+
+#mascot-svg .glint {
+  fill: rgba(255, 255, 255, 0.9);
+}
+
+#mascot-svg .glint.small {
+  fill: rgba(255, 255, 255, 0.55);
+}
+
+#mascot-svg .sub-cam circle {
+  fill: #263040;
+  stroke: #3c211c;
+  stroke-width: 3;
+}
+
+/* 瞬き。目のグループごと縦に潰す */
+#mascot-svg .eye {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: blink 5.5s infinite;
+}
+
+@keyframes blink {
+  0%,
+  92%,
+  100% {
+    transform: scaleY(1);
+  }
+  95% {
+    transform: scaleY(0.08);
+  }
+}
+
+/* 喋っている間は軽く頷く */
+#mascot.talking #mascot-svg,
+#mascot.has-image.talking #mascot-img {
+  animation: nod 0.5s ease-in-out infinite;
+}
+
+@keyframes nod {
+  50% {
+    transform: translateY(3px) rotate(-1.5deg);
+  }
+}
+
+@keyframes bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+/* --- 画像を使う場合 ------------------------------------------------------ */
+/* assets/mascot.png を置くと、上の SVG の代わりにそれが表示される */
+#mascot-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  /* 画像を掴んでもブラウザのドラッグ＆ドロップを始めさせない */
+  -webkit-user-drag: none;
+  /* 透過PNGの形に沿った影。四角い影にはならない */
+  filter: drop-shadow(0 6px 8px rgba(0, 0, 0, 0.35));
+}
+
+/* --- 入力欄 -------------------------------------------------------------- */
+#input-row {
+  width: 260px;
+}
+
+#input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-family: inherit;
+  color: #2b2b2b;
+  background: #fffdf8;
+  border: 2px solid #3a3a3a;
+  border-radius: 999px;
+  outline: none;
+}
+
+#input:focus {
+  border-color: #4aa8d8;
+}

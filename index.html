@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <title>Desktop Mascot</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div id="stage">
+      <!-- 吹き出し -->
+      <div id="bubble" class="hidden">
+        <p id="bubble-text"></p>
+      </div>
+
+      <!-- マスコット本体。assets/mascot.png を置くとその画像が使われ、
+           無ければ下の CSS だけで描いたキャラにそのまま戻る -->
+      <div id="mascot" title="クリックで話しかける / ドラッグで移動">
+        <img
+          id="mascot-img"
+          src="assets/mascot.png"
+          alt=""
+          draggable="false"
+          hidden
+        />
+        <div id="mascot-fallback">
+          <svg id="mascot-svg" viewBox="0 0 240 215" role="img" aria-label="マスコット">
+            <defs>
+              <linearGradient id="shellGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stop-color="#f2765e" />
+                <stop offset="0.45" stop-color="#d8412c" />
+                <stop offset="1" stop-color="#a3281a" />
+              </linearGradient>
+              <linearGradient id="lensGrad" x1="0" y1="0" x2="0.3" y2="1">
+                <stop offset="0" stop-color="#cdf6ff" />
+                <stop offset="0.45" stop-color="#41b9e8" />
+                <stop offset="1" stop-color="#16608f" />
+              </linearGradient>
+            </defs>
+
+            <ellipse class="ground" cx="120" cy="204" rx="64" ry="8" />
+
+            <!-- 脚 -->
+            <g class="legs">
+              <path d="M80 118 L50 146 L46 180" />
+              <path d="M160 118 L190 146 L194 180" />
+              <path d="M94 132 L64 170 L70 194" />
+              <path d="M146 132 L176 170 L170 194" />
+            </g>
+            <g class="joints">
+              <circle cx="50" cy="146" r="7" />
+              <circle cx="190" cy="146" r="7" />
+              <circle cx="64" cy="170" r="7" />
+              <circle cx="176" cy="170" r="7" />
+            </g>
+            <g class="feet">
+              <ellipse cx="46" cy="182" rx="11" ry="7" />
+              <ellipse cx="194" cy="182" rx="11" ry="7" />
+              <ellipse cx="70" cy="196" rx="12" ry="7" />
+              <ellipse cx="170" cy="196" rx="12" ry="7" />
+            </g>
+
+            <!-- アンテナ -->
+            <path class="antenna" d="M94 40 L84 12" />
+            <circle class="antenna-tip" cx="84" cy="10" r="5" />
+
+            <!-- 胴体 -->
+            <rect class="shell" x="38" y="32" width="164" height="94" rx="47" />
+            <path class="seam" d="M60 60 Q120 44 180 60" />
+            <ellipse class="gloss" cx="92" cy="56" rx="30" ry="12" />
+
+            <!-- 側面カメラ -->
+            <g class="sub-cam">
+              <circle cx="66" cy="110" r="10" />
+              <circle cx="174" cy="110" r="10" />
+            </g>
+
+            <!-- 頭部 -->
+            <circle class="shell head" cx="120" cy="132" r="39" />
+            <g class="eye">
+              <circle class="rim" cx="120" cy="131" r="27" />
+              <circle class="lens" cx="120" cy="131" r="22" />
+              <circle class="glint" cx="111" cy="122" r="7" />
+              <circle class="glint small" cx="130" cy="140" r="3.5" />
+            </g>
+          </svg>
+        </div>
+      </div>
+
+      <!-- 入力欄 -->
+      <div id="input-row" class="hidden">
+        <input
+          id="input"
+          type="text"
+          autocomplete="off"
+          placeholder="話しかける…"
+        />
+      </div>
+    </div>
+
+    <script src="renderer.js"></script>
+  </body>
+</html>
