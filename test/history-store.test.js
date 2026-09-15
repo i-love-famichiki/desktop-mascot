@@ -1,0 +1,164 @@
+'use strict';
+
+// 履歴の保存と要約のテスト。Gemini は呼ばず、要約は偽物の関数で置き換える。
+// 日時は compact(summarize, now) の now で固定するので、PC の日付を変えなくてよい。
+// 実行:  npm test
+
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { HistoryStore, retentionCutoff } = require('../history-store');
+
+// 「今」は 2026-09-15 12:00（ローカル時刻）とする。
+// 直近7日 = 9/9〜9/15 は残し、9/8 以前を要約する
+const NOW = new Date(2026, 8, 15, 12, 0).getTime();
+const at = (month, day, hour = 10, minute = 0) => new Date(2026, month - 1, day, hour, minute).getTime();
+
+function tempFile() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mascot-history-'));
+  return path.join(dir, 'history.json');
+}
+
+function say(role, content, time) {
+  return { role, content, at: time };
+}
+
+test('境目: 9/8 23:59 までは要約に回し、9/9 0:00 からは詳しいまま残す', async () => {
+  assert.equal(retentionCutoff(NOW), at(9, 9, 0, 0));
+
+  const store = new HistoryStore(tempFile());
+  store.messages = [
+    say('user', '8日の夜の話', at(9, 8, 23, 59)),
+    say('user', '9日の朝の話', at(9, 9, 0, 0)),
+  ];
+  const calls = [];
+  await store.compact(async (date, messages) => {
+    calls.push([date, messages.map((m) => m.content)]);
+    return '8日のまとめ';
+  }, NOW);
+
+  assert.deepEqual(calls, [['2026-09-08', ['8日の夜の話']]]);
+  assert.deepEqual(store.messages.map((m) => m.content), ['9日の朝の話']);
+  assert.deepEqual(store.summaries.map((s) => [s.date, s.summary]), [['2026-09-08', '8日のまとめ']]);
+});
+
+test('古い会話は日ごとに要約され、ファイルに保存されて読み直せる', async () => {
+  const file = tempFile();
+  const store = new HistoryStore(file);
+  store.messages = [
+    say('user', '猫の名前はミケ', at(9, 1)),
+    say('assistant', 'かわいい名前だね', at(9, 1, 10, 1)),
+    say('user', '歯医者に行く', at(9, 5)),
+    say('user', '今日の話', at(9, 15)),
+  ];
+
+  const result = await store.compact(async (date, messages) => `${date} は ${messages.length} 件`, NOW);
+
+  assert.deepEqual(result, { summarizedDays: ['2026-09-01', '2026-09-05'], failedDay: null });
+  const reloaded = new HistoryStore(file);
+  reloaded.load();
+  assert.deepEqual(reloaded.messages.map((m) => m.content), ['今日の話']);
+  assert.deepEqual(reloaded.summaries.map((s) => [s.date, s.summary]), [
+    ['2026-09-01', '2026-09-01 は 2 件'],
+    ['2026-09-05', '2026-09-05 は 1 件'],
+  ]);
+});
+
+test('要約に失敗した日は詳しいまま残し、そこで止める（次回の起動でやり直す）', async () => {
+  const store = new HistoryStore(tempFile());
+  store.messages = [
+    say('user', '1日の話', at(9, 1)),
+    say('user', '2日の話', at(9, 2)),
+    say('user', '3日の話', at(9, 3)),
+  ];
+  const called = [];
+  const result = await store.compact(async (date) => {
+    called.push(date);
+    if (date === '2026-09-02') throw new Error('429');
+    return 'まとめ';
+  }, NOW);
+
+  assert.deepEqual(result, { summarizedDays: ['2026-09-01'], failedDay: '2026-09-02' });
+  assert.deepEqual(called, ['2026-09-01', '2026-09-02'], '失敗したあとの日は呼ばない');
+  assert.deepEqual(store.messages.map((m) => m.content), ['2日の話', '3日の話']);
+
+  // 次の起動では続きから要約される
+  const retry = await store.compact(async () => 'やり直しのまとめ', NOW);
+  assert.deepEqual(retry.summarizedDays, ['2026-09-02', '2026-09-03']);
+  assert.equal(store.messages.length, 0);
+});
+
+test('空の要約は失敗扱いにして、詳しい会話を消さない', async () => {
+  const store = new HistoryStore(tempFile());
+  store.messages = [say('user', '1日の話', at(9, 1))];
+  const result = await store.compact(async () => '   ', NOW);
+  assert.equal(result.failedDay, '2026-09-01');
+  assert.equal(store.messages.length, 1);
+  assert.equal(store.summaries.length, 0);
+});
+
+test('要約を待っている間に話しかけられても、その発言は消えない', async () => {
+  const store = new HistoryStore(tempFile());
+  store.messages = [say('user', '古い話', at(9, 1))];
+  await store.compact(async () => {
+    await store.append(say('user', '要約中に話しかけた', at(9, 15, 12, 1)));
+    return 'まとめ';
+  }, NOW);
+  assert.deepEqual(store.messages.map((m) => m.content), ['要約中に話しかけた']);
+});
+
+test('要約するものが無ければ Gemini（要約の関数）を呼ばない', async () => {
+  const store = new HistoryStore(tempFile());
+  store.messages = [say('user', '今日の話', at(9, 15))];
+  let called = false;
+  const result = await store.compact(async () => { called = true; return 'x'; }, NOW);
+  assert.equal(called, false);
+  assert.deepEqual(result, { summarizedDays: [], failedDay: null });
+});
+
+test('ファイルが無ければ空で始まる', () => {
+  const store = new HistoryStore(tempFile());
+  store.load();
+  assert.deepEqual([store.messages, store.summaries], [[], []]);
+});
+
+test('先頭に BOM が付いた履歴ファイルも読める', () => {
+  const file = tempFile();
+  fs.writeFileSync(file, '﻿' + JSON.stringify({ messages: [say('user', 'こんにちは', at(9, 15))], summaries: [] }), 'utf8');
+  const store = new HistoryStore(file);
+  store.load();
+  assert.deepEqual(store.messages.map((m) => m.content), ['こんにちは']);
+});
+
+test('壊れた JSON は別名で退避して、空で始める', () => {
+  const file = tempFile();
+  fs.writeFileSync(file, '{ こわれている');
+  const store = new HistoryStore(file);
+  store.load();
+  assert.deepEqual([store.messages, store.summaries], [[], []]);
+  const backups = fs.readdirSync(path.dirname(file)).filter((name) => name.includes('.broken-'));
+  assert.equal(backups.length, 1);
+});
+
+test('システムプロンプト用の要約は、新しいものから30件まで・日付の古い順に並ぶ', () => {
+  const store = new HistoryStore(tempFile());
+  // 並び順は日付の古い順（compact が並べ替えて保存している前提）
+  store.summaries = Array.from({ length: 40 }, (_, i) => {
+    const d = new Date(2026, 6, 1 + i);
+    return { date: d.toISOString().slice(0, 10), summary: `まとめ${i + 1}` };
+  });
+  const lines = store.summariesForPrompt().split('\n');
+  assert.equal(lines.length, 30);
+  assert.match(lines[0], /まとめ11$/);
+  assert.match(lines.at(-1), /まとめ40$/);
+});
+
+test('システムプロンプト用の要約は、全体で2000文字を超えない', () => {
+  const store = new HistoryStore(tempFile());
+  store.summaries = Array.from({ length: 30 }, (_, i) => ({ date: `2026-08-${i + 1}`, summary: 'あ'.repeat(140) }));
+  const text = store.summariesForPrompt();
+  assert.ok(text.length <= 2000 + 30, `長さ ${text.length}`);
+  assert.ok(text.split('\n').length < 30);
+});

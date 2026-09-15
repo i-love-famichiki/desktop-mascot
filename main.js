@@ -1,7 +1,22 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain, screen, Menu, Tray, net, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, screen, Menu, Tray, net, shell, dialog } = require('electron');
 const path = require('path');
+const { HistoryStore } = require('./history-store');
+const { loadSettings, saveSettings } = require('./settings');
+
+// 自動起動（Windows にサインインしたとき立ち上がる）で起動されたときに付く目印
+const AUTOSTART_ARG = '--autostart';
+// 自動起動のときは、ほかの常駐アプリと重ならないよう少し待ってから表示する
+const AUTOSTART_DELAY_MS = 15 * 1000;
+// レジストリ（HKCU\...\CurrentVersion\Run）に書く名前
+const LOGIN_ITEM_NAME = 'DesktopMascot';
+
+// 自動起動と手動の npm start が重なっても、マスコットは1つだけにする
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+  return;
+}
 
 // Gemini API で返事をもらう。キーは環境変数 GEMINI_API_KEY から読む。
 // 雑談用なので速くて安いモデルを使う。賢さが欲しくなったら 'gemini-3.8-flash' などに。
@@ -17,6 +32,18 @@ const SOURCES_MAX = 3;
 const HISTORY_MAX_TURNS = 20;
 // 1回の発言も長すぎると文脈を圧迫するので上限を設けておく
 const USER_TEXT_MAX_CHARS = 2000;
+
+// 古い会話の要約。1日分の会話ログは長すぎる分を切ってから送り、要約も短く切る
+const SUMMARY_SOURCE_MAX_CHARS = 8000;
+const SUMMARY_MAX_CHARS = 150;
+const SUMMARY_PROMPT = [
+  'あなたは会話ログを短くまとめる係です。',
+  'ユーザーとデスクトップマスコットの1日分の会話ログを、日本語で1〜2文（100文字程度まで）に要約してください。',
+  '話題と、ユーザーについて分かったこと（名前、好み、予定、困っていることなど）を優先して残してください。',
+  'あいさつや短い雑談だけの日は「軽い雑談のみ」のように短く書いてください。',
+  '後から読んでも分かるよう、「明日」「来週の月曜」などは会話の日付をもとに「9月14日」のような日付に直してください。',
+  '前置きや箇条書きは使わず、要約の文だけを返してください。',
+].join('\n');
 
 // 「分からないことは分からないと言って」だけだと、キャラになりきって
 // 知っていることまで分からないと答えてしまうため、答えてよい範囲をはっきり書く。
@@ -36,7 +63,20 @@ function buildSystemPrompt() {
     '名前はまだありません。ユーザーが名前をくれたら喜んで受け取ってください。',
     '口調は親しみやすく、少しだけ子どもっぽく、絵文字は使いません。',
     '返事は必ず日本語で、基本は2〜3文の短さに収めてください。画面の小さな吹き出しに表示されます。',
+    ...memoryPromptLines(),
   ].join('\n');
+}
+
+// 7日より前の会話は要約だけが残っている。話題に関係があるときだけ使ってもらう
+function memoryPromptLines() {
+  const summaries = store.summariesForPrompt();
+  if (!summaries) return [];
+  return [
+    '',
+    '以下は、1週間より前にユーザーと話した内容の短い要約（古い記憶）です。',
+    '今の話題に関係があるときだけ参考にし、関係がなければ自分から持ち出さないでください。',
+    summaries,
+  ];
 }
 
 /** @type {BrowserWindow | null} */
@@ -44,9 +84,19 @@ let win = null;
 /** @type {Tray | null} */
 let tray = null;
 
-// 会話履歴はメインプロセスだけが持つ（メモリ上のみ）
-// 要素は { role: 'user' | 'assistant', content: string, at: number }
-let history = [];
+// 会話履歴はメインプロセスだけが持ち、data/history.json に保存する（終了しても消えない）。
+// テストのときは環境変数 MASCOT_HISTORY_FILE で保存先を差し替えられる。
+const store = new HistoryStore(
+  process.env.MASCOT_HISTORY_FILE
+    ? path.resolve(process.env.MASCOT_HISTORY_FILE)
+    : path.join(__dirname, 'data', 'history.json'),
+);
+
+// 設定（自動起動の ON/OFF など）。テストのときは MASCOT_SETTINGS_FILE で差し替えられる
+const settingsFile = process.env.MASCOT_SETTINGS_FILE
+  ? path.resolve(process.env.MASCOT_SETTINGS_FILE)
+  : path.join(__dirname, 'data', 'settings.json');
+let settings = loadSettings(settingsFile);
 
 // ウィンドウの基本の高さ。長い返事のときだけ一時的に上へ伸ばす
 const WINDOW_MIN_HEIGHT = 420;
@@ -93,24 +143,89 @@ function createTray() {
 function buildMenu() {
   return Menu.buildFromTemplate([
     { label: '会話の履歴を見る', click: () => win?.webContents.send('history:show') },
-    { label: '会話をリセット', click: () => { history = []; } },
+    { label: '会話をリセット', click: confirmReset },
+    { type: 'separator' },
+    {
+      label: '起動時に自動で立ち上げる',
+      type: 'checkbox',
+      checked: settings.openAtLogin,
+      // チェックの表示は押した時点で切り替わっているので、その値を保存する
+      click: (item) => setOpenAtLogin(item.checked),
+    },
     { type: 'separator' },
     { label: '終了', click: () => app.quit() },
   ]);
+}
+
+// ---------------------------------------------------------------------------
+// 自動起動
+// ---------------------------------------------------------------------------
+function setOpenAtLogin(enabled) {
+  settings = { ...settings, openAtLogin: enabled };
+  saveSettings(settingsFile, settings);
+  applyOpenAtLogin();
+  // トレイのメニューは作った時点のチェック状態を持っているので作り直す
+  tray?.setContextMenu(buildMenu());
+}
+
+/**
+ * 設定に合わせて、Windows の自動起動の登録（レジストリの Run）を書く／消す。
+ * 起動のたびに呼び、フォルダを移したときなどもここで登録し直す。
+ */
+function applyOpenAtLogin() {
+  // exe 化前は electron.exe にプロジェクトフォルダを渡して起動する形で登録する
+  const args = app.isPackaged ? [AUTOSTART_ARG] : [__dirname, AUTOSTART_ARG];
+  app.setLoginItemSettings({
+    openAtLogin: settings.openAtLogin,
+    name: LOGIN_ITEM_NAME,
+    path: process.execPath,
+    args,
+  });
 }
 
 ipcMain.on('menu:show', () => {
   if (win) buildMenu().popup({ window: win });
 });
 
-app.whenReady().then(() => {
-  createWindow();
+// 履歴はファイルに残るようになったので、消す前に確認する
+async function confirmReset() {
+  const options = {
+    type: 'warning',
+    buttons: ['消す', 'やめる'],
+    defaultId: 1,
+    cancelId: 1,
+    title: '会話をリセット',
+    message: '会話の履歴と、古い会話の要約をすべて消します。',
+    detail: '消した内容は元に戻せません。',
+  };
+  // 自動起動の待ち時間中はまだウィンドウが無いので、トレイから押されたら単独で出す
+  const { response } = win ? await dialog.showMessageBox(win, options) : await dialog.showMessageBox(options);
+  if (response === 0) await store.clear();
+}
+
+app.whenReady().then(async () => {
+  applyOpenAtLogin();
+  store.load();
   try {
     createTray();
   } catch (err) {
     // アイコン未配置でも起動は止めない
     console.warn('トレイの作成をスキップしました:', err.message);
   }
+
+  // 自動起動のときだけ、少し待ってから表示する（待っている間もトレイからは操作できる）
+  if (process.argv.includes(AUTOSTART_ARG)) {
+    console.log(`[startup] 自動起動なので ${AUTOSTART_DELAY_MS / 1000} 秒待ってから表示します`);
+    await new Promise((resolve) => setTimeout(resolve, AUTOSTART_DELAY_MS));
+  }
+  createWindow();
+  console.log('[startup] マスコットを表示しました');
+
+  // 7日より前の会話の要約は、起動時に1回だけ行う。終わるのを待たずに会話できる
+  store.compact(summarizeDay).then(({ summarizedDays, failedDay }) => {
+    if (summarizedDays.length) console.log('[history] 要約しました:', summarizedDays.join(', '));
+    if (failedDay) console.log('[history] 次回の起動で続きを要約します:', failedDay);
+  });
 });
 
 app.on('window-all-closed', () => app.quit());
@@ -175,21 +290,20 @@ ipcMain.handle('chat:send', (_event, userText) => {
   return reply;
 });
 
-// 履歴の表示用。メモリ上の会話をそのまま渡す（終了やリセットで消える）
-ipcMain.handle('chat:history', () =>
-  history.map(({ role, content, at }) => ({ role, content, at })),
-);
+// 履歴の表示用。古い会話の要約と、直近7日の詳しい会話を渡す
+ipcMain.handle('chat:history', () => ({
+  summaries: store.summaries.map(({ date, summary }) => ({ date, summary })),
+  messages: store.messages.map(({ role, content, at }) => ({ role, content, at })),
+}));
 
 async function chat(userText) {
   try {
-    const { text, sources } = await askGemini(buildContents(history, userText));
-    history.push(
+    const { text, sources } = await askGemini(buildContents(store.messages, userText));
+    // 返事を表示するのに保存の完了は待たない（失敗しても store 側でログに出す）
+    store.append(
       { role: 'user', content: userText, at: Date.now() },
       { role: 'assistant', content: text, at: Date.now() },
-    );
-
-    // 履歴が伸びすぎないよう、古い方から捨てる（直近20往復ぶん）
-    if (history.length > HISTORY_MAX_TURNS * 2) history = history.slice(-HISTORY_MAX_TURNS * 2);
+    ).catch(() => {});
 
     return { ok: true, text, sources };
   } catch (err) {
@@ -206,6 +320,26 @@ ipcMain.on('link:open', (_event, url) => {
     // URL として読めないものは無視する
   }
 });
+
+/**
+ * 1日分の会話を Gemini で1〜2文に要約する（検索は使わない）。
+ * @param {string} date
+ * @param {{ role: string, content: string }[]} messages
+ */
+async function summarizeDay(date, messages) {
+  const log = messages
+    .map((message) => `${message.role === 'user' ? 'ユーザー' : 'マスコット'}: ${message.content}`)
+    .join('\n');
+  // 「来週の月曜」などを日付に直せるよう、曜日も添える
+  const [year, month, day] = date.split('-').map(Number);
+  const weekday = new Date(year, month - 1, day).toLocaleDateString('ja-JP', { weekday: 'short' });
+  const { text } = await askGemini(
+    [{ role: 'user', parts: [{ text: `${date}（${weekday}）の会話ログ:\n${clip(log, SUMMARY_SOURCE_MAX_CHARS)}` }] }],
+    { systemPrompt: SUMMARY_PROMPT, tools: [] },
+  );
+  // 吹き出しや一覧で扱いやすいよう1行にまとめる
+  return clip(text.replace(/\s*\n\s*/g, ' '), SUMMARY_MAX_CHARS);
+}
 
 /** 今日の直近の会話に新しい発言を足して、Gemini に送る contents の形にする */
 function buildContents(pastMessages, userText) {
@@ -236,10 +370,11 @@ class GeminiError extends Error {
 
 /**
  * Gemini API を呼んで、返事の本文と出典を返す。
- * Google 検索を道具として渡しておき、検索するかどうかはモデルが決める。
+ * 会話では Google 検索を道具として渡しておき、検索するかどうかはモデルが決める。
+ * 要約のときは systemPrompt を差し替え、tools を空にして検索させない。
  * @returns {Promise<{ text: string, sources: { title: string, uri: string }[] }>}
  */
-async function askGemini(contents) {
+async function askGemini(contents, { systemPrompt = buildSystemPrompt(), tools = [{ google_search: {} }] } = {}) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new GeminiError('no-key', 'GEMINI_API_KEY が設定されていません');
 
@@ -250,9 +385,9 @@ async function askGemini(contents) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
       body: JSON.stringify({
-        systemInstruction: { parts: [{ text: buildSystemPrompt() }] },
+        systemInstruction: { parts: [{ text: systemPrompt }] },
         contents,
-        tools: [{ google_search: {} }],
+        ...(tools.length > 0 && { tools }),
       }),
       signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
     });

@@ -4,7 +4,9 @@
   "description": "",
   "main": "main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "test": "node --test test/*.test.js",
+    "mock-history": "node test/make-mock-history.js"
   },
   "keywords": [],
   "author": "",

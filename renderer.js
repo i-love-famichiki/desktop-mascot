@@ -81,14 +81,18 @@ const HISTORY_MAX_HEIGHT = 360;
 
 async function showHistory() {
   if (busy) return;
-  const messages = await window.mascot.getHistory();
-  if (messages.length === 0) {
+  // 1週間より前は要約だけ、直近7日は詳しい会話が届く
+  const { summaries, messages } = await window.mascot.getHistory();
+  if (summaries.length === 0 && messages.length === 0) {
     say('まだ会話していないよ。');
     return;
   }
 
   clearTimeout(hideTimer);
-  bubbleTextEl.replaceChildren(...messages.map(renderHistoryItem));
+  bubbleTextEl.replaceChildren(
+    ...summaries.map(renderSummaryItem),
+    ...messages.map(renderHistoryItem),
+  );
   showSources([]);
   bubbleEl.classList.remove('hidden', 'minimized');
   bubbleEl.classList.add('history');
@@ -100,17 +104,32 @@ async function showHistory() {
 }
 
 function renderHistoryItem(message) {
+  // 何日分も残るので、時刻だけでなく日付も添える
+  const time = new Date(message.at).toLocaleString('ja-JP', {
+    month: 'numeric',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+  return buildHistoryItem(message.role, `${message.role === 'user' ? 'あなた' : '豆'}  ${time}`, message.content);
+}
+
+function renderSummaryItem({ date, summary }) {
+  const [, month, day] = date.split('-').map(Number);
+  return buildHistoryItem('summary', `${month}/${day} のまとめ`, summary);
+}
+
+function buildHistoryItem(kind, label, text) {
   const item = document.createElement('span');
-  item.className = `history-item ${message.role}`;
+  item.className = `history-item ${kind}`;
 
   const who = document.createElement('span');
   who.className = 'history-who';
-  const time = new Date(message.at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
-  who.textContent = `${message.role === 'user' ? 'あなた' : '豆'}  ${time}`;
+  who.textContent = label;
 
   const body = document.createElement('span');
   body.className = 'history-body';
-  body.textContent = message.content;
+  body.textContent = text;
 
   item.append(who, body);
   return item;

@@ -2,3 +2,5 @@ node_modules/
 dist/
 .env
 *.log
+# 会話の履歴（個人的な内容なので記録しない）
+data/

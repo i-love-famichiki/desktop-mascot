@@ -118,6 +118,15 @@ body {
   color: #4f8a2a;
 }
 
+/* 1週間より前の会話の要約。詳しい会話と見分けやすいよう少し薄くする */
+.history-item.summary .history-who {
+  color: #9a7b2f;
+}
+
+.history-item.summary .history-body {
+  color: #666;
+}
+
 .history-body {
   display: block;
 }
