@@ -13,5 +13,13 @@ contextBridge.exposeInMainWorld('mascot', {
   dragStart: () => ipcRenderer.send('drag:start'),
   dragMove: () => ipcRenderer.send('drag:move'),
   dragEnd: () => ipcRenderer.send('drag:end'),
-  quit: () => ipcRenderer.send('app:quit'),
+  fitHeight: (height) => ipcRenderer.send('window:fit-height', height),
+  setClickThrough: (enabled) => ipcRenderer.send('window:click-through', enabled),
+  showMenu: () => ipcRenderer.send('menu:show'),
+  getHistory: () => ipcRenderer.invoke('chat:history'),
+  onShowHistory: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on('history:show', listener);
+    return () => ipcRenderer.removeListener('history:show', listener);
+  },
 });

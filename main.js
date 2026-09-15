@@ -42,12 +42,15 @@ let tray = null;
 // 要素は { role: 'user' | 'assistant', content: string, at: number }
 let history = [];
 
+// ウィンドウの基本の高さ。長い返事のときだけ一時的に上へ伸ばす
+const WINDOW_MIN_HEIGHT = 420;
+
 function createWindow() {
   const { workArea } = screen.getPrimaryDisplay();
 
   win = new BrowserWindow({
     width: 320,
-    height: 420,
+    height: WINDOW_MIN_HEIGHT,
     // 右下に初期配置
     x: workArea.x + workArea.width - 360,
     y: workArea.y + workArea.height - 460,
@@ -67,6 +70,9 @@ function createWindow() {
 
   // 全画面アプリの上にも出す
   win.setAlwaysOnTop(true, 'screen-saver');
+  // 透明な部分のクリックは後ろのアプリに渡す。マウスの動きだけは受け取り、
+  // マスコットや吹き出しの上に来たらレンダラーが受け付けに切り替える
+  win.setIgnoreMouseEvents(true, { forward: true });
   win.loadFile('index.html');
 }
 
@@ -74,14 +80,22 @@ function createTray() {
   // アイコンは後で差し替える。空でもトレイには載る。
   tray = new Tray(path.join(__dirname, 'assets', 'tray.png'));
   tray.setToolTip('Desktop Mascot');
-  tray.setContextMenu(
-    Menu.buildFromTemplate([
-      { label: '会話をリセット', click: () => { history = []; } },
-      { type: 'separator' },
-      { label: '終了', click: () => app.quit() },
-    ]),
-  );
+  tray.setContextMenu(buildMenu());
 }
+
+/** トレイと、マスコットの右クリックで共通のメニュー */
+function buildMenu() {
+  return Menu.buildFromTemplate([
+    { label: '会話の履歴を見る', click: () => win?.webContents.send('history:show') },
+    { label: '会話をリセット', click: () => { history = []; } },
+    { type: 'separator' },
+    { label: '終了', click: () => app.quit() },
+  ]);
+}
+
+ipcMain.on('menu:show', () => {
+  if (win) buildMenu().popup({ window: win });
+});
 
 app.whenReady().then(() => {
   createWindow();
@@ -118,7 +132,30 @@ ipcMain.on('drag:end', () => {
   dragOffset = null;
 });
 
-ipcMain.on('app:quit', () => app.quit());
+// ---------------------------------------------------------------------------
+// ウィンドウの高さ合わせ
+// ---------------------------------------------------------------------------
+// 長い返事が吹き出しに収まるよう、足元の位置はそのままで上に伸ばす。
+// 短くなったら元の高さまで戻す。画面の高さを超える分は吹き出しの中でスクロール。
+// 画面の上端につかえたときは下へずらすので、そのずれを覚えておき、縮めるときに戻す。
+let pushedDown = 0;
+
+ipcMain.on('window:fit-height', (_event, requested) => {
+  if (!win || dragOffset) return;
+  const bounds = win.getBounds();
+  const { workArea } = screen.getDisplayMatching(bounds);
+  const height = Math.round(Math.min(Math.max(requested, WINDOW_MIN_HEIGHT), workArea.height));
+  if (height === bounds.height) return;
+
+  const bottom = bounds.y + bounds.height - pushedDown;
+  const y = Math.max(workArea.y, bottom - height);
+  pushedDown = y + height - bottom;
+  win.setBounds({ x: bounds.x, y, width: bounds.width, height });
+});
+
+ipcMain.on('window:click-through', (_event, enabled) => {
+  win?.setIgnoreMouseEvents(Boolean(enabled), { forward: true });
+});
 
 // ---------------------------------------------------------------------------
 // Gemini との会話
@@ -131,6 +168,11 @@ ipcMain.handle('chat:send', (_event, userText) => {
   chatQueue = reply.catch(() => {});
   return reply;
 });
+
+// 履歴の表示用。メモリ上の会話をそのまま渡す（終了やリセットで消える）
+ipcMain.handle('chat:history', () =>
+  history.map(({ role, content, at }) => ({ role, content, at })),
+);
 
 async function chat(userText) {
   try {

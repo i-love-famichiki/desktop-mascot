@@ -9,7 +9,11 @@
     <div id="stage">
       <!-- 吹き出し -->
       <div id="bubble" class="hidden">
+        <button id="bubble-minimize" class="bubble-button" type="button" title="小さくする" aria-label="小さくする">－</button>
+        <button id="bubble-close" class="bubble-button" type="button" title="閉じる" aria-label="閉じる">×</button>
         <p id="bubble-text"></p>
+        <!-- 小さくしたときだけ出る。押すと元に戻る -->
+        <button id="bubble-restore" type="button">返事を見る</button>
       </div>
 
       <!-- マスコット本体。assets/mascot.png を置くとその画像が使われ、
@@ -23,64 +27,30 @@
           hidden
         />
         <div id="mascot-fallback">
-          <svg id="mascot-svg" viewBox="0 0 240 215" role="img" aria-label="マスコット">
+          <svg id="mascot-svg" viewBox="0 0 200 160" role="img" aria-label="枝豆のマスコット">
             <defs>
-              <linearGradient id="shellGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0" stop-color="#f2765e" />
-                <stop offset="0.45" stop-color="#d8412c" />
-                <stop offset="1" stop-color="#a3281a" />
-              </linearGradient>
-              <linearGradient id="lensGrad" x1="0" y1="0" x2="0.3" y2="1">
-                <stop offset="0" stop-color="#cdf6ff" />
-                <stop offset="0.45" stop-color="#41b9e8" />
-                <stop offset="1" stop-color="#16608f" />
-              </linearGradient>
+              <!-- 左上から光が当たって見えるよう、明るい中心を左上に寄せる -->
+              <radialGradient id="beanGrad" cx="0.38" cy="0.32" r="0.75">
+                <stop offset="0" stop-color="#c9ef8a" />
+                <stop offset="0.5" stop-color="#8fd14f" />
+                <stop offset="1" stop-color="#5aa832" />
+              </radialGradient>
             </defs>
 
-            <ellipse class="ground" cx="120" cy="204" rx="64" ry="8" />
+            <!-- 接地した影。豆の底に触れる高さに置き、浮いて見えないようにする -->
+            <ellipse class="ground" cx="104" cy="141" rx="70" ry="9" />
 
-            <!-- 脚 -->
-            <g class="legs">
-              <path d="M80 118 L50 146 L46 180" />
-              <path d="M160 118 L190 146 L194 180" />
-              <path d="M94 132 L64 170 L70 194" />
-              <path d="M146 132 L176 170 L170 194" />
-            </g>
-            <g class="joints">
-              <circle cx="50" cy="146" r="7" />
-              <circle cx="190" cy="146" r="7" />
-              <circle cx="64" cy="170" r="7" />
-              <circle cx="176" cy="170" r="7" />
-            </g>
-            <g class="feet">
-              <ellipse cx="46" cy="182" rx="11" ry="7" />
-              <ellipse cx="194" cy="182" rx="11" ry="7" />
-              <ellipse cx="70" cy="196" rx="12" ry="7" />
-              <ellipse cx="170" cy="196" rx="12" ry="7" />
-            </g>
-
-            <!-- アンテナ -->
-            <path class="antenna" d="M94 40 L84 12" />
-            <circle class="antenna-tip" cx="84" cy="10" r="5" />
-
-            <!-- 胴体 -->
-            <rect class="shell" x="38" y="32" width="164" height="94" rx="47" />
-            <path class="seam" d="M60 60 Q120 44 180 60" />
-            <ellipse class="gloss" cx="92" cy="56" rx="30" ry="12" />
-
-            <!-- 側面カメラ -->
-            <g class="sub-cam">
-              <circle cx="66" cy="110" r="10" />
-              <circle cx="174" cy="110" r="10" />
-            </g>
-
-            <!-- 頭部 -->
-            <circle class="shell head" cx="120" cy="132" r="39" />
-            <g class="eye">
-              <circle class="rim" cx="120" cy="131" r="27" />
-              <circle class="lens" cx="120" cy="131" r="22" />
-              <circle class="glint" cx="111" cy="122" r="7" />
-              <circle class="glint small" cx="130" cy="140" r="3.5" />
+            <!-- 豆1粒（少しだけ傾ける）。下側を少しへこませたそら豆形 -->
+            <g transform="rotate(-10 100 80)">
+              <path
+                class="bean"
+                d="M30 80 C26 40 70 18 110 22 C156 26 182 52 178 88 C174 122 140 138 104 132 C88 129 80 118 66 120 C44 124 32 108 30 80 Z"
+              />
+              <!-- へそ（豆がさやについていた跡） -->
+              <path class="hilum" d="M78 116 Q92 125 108 124" />
+              <!-- つや -->
+              <ellipse class="gloss" cx="76" cy="50" rx="24" ry="11" transform="rotate(-18 76 50)" />
+              <ellipse class="gloss small" cx="150" cy="60" rx="6" ry="4" />
             </g>
           </svg>
         </div>
