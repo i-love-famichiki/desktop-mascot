@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain, screen, Menu, Tray, net } = require('electron');
+const { app, BrowserWindow, ipcMain, screen, Menu, Tray, net, shell } = require('electron');
 const path = require('path');
 
 // Gemini API で返事をもらう。キーは環境変数 GEMINI_API_KEY から読む。
@@ -10,6 +10,9 @@ const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models
 
 const GEMINI_TIMEOUT_MS = 30 * 1000;
 
+// 吹き出しに添える出典の数の上限（小さい吹き出しなので少なめに）
+const SOURCES_MAX = 3;
+
 // 送る会話履歴の上限（今日の直近20往復まで）
 const HISTORY_MAX_TURNS = 20;
 // 1回の発言も長すぎると文脈を圧迫するので上限を設けておく
@@ -17,6 +20,8 @@ const USER_TEXT_MAX_CHARS = 2000;
 
 // 「分からないことは分からないと言って」だけだと、キャラになりきって
 // 知っていることまで分からないと答えてしまうため、答えてよい範囲をはっきり書く。
+// 天気やニュースは Google 検索（tools の google_search）で調べられるので、
+// 検索するかどうかはモデル自身に判断させる。
 // 日付は話しかけるたびに入れ直す（モデルは今日が何日か知らない）。
 function buildSystemPrompt() {
   const now = new Date().toLocaleString('ja-JP', { dateStyle: 'full', timeStyle: 'short' });
@@ -25,7 +30,8 @@ function buildSystemPrompt() {
     '見た目はマスコットですが、中身は物知りな AI アシスタントです。',
     '漢字、言葉、料理、勉強、プログラミングなど、一般的な知識で答えられることは遠慮なく教えてください。',
     '「ぼくはマスコットだから」「食べたことがないから」などを理由に、知っていることを分からないと言ってはいけません。',
-    '天気やニュースなどリアルタイムの情報は調べられないので、その場合だけ正直に分からないと伝えてください。',
+    '天気、ニュース、最近の出来事など新しい情報が必要なときは、Google 検索で調べてから答えてください。',
+    '場所によって答えが変わる質問（天気など）で場所が分からないときは、短く聞き返してください。',
     `現在の日時は ${now} です。`,
     '名前はまだありません。ユーザーが名前をくれたら喜んで受け取ってください。',
     '口調は親しみやすく、少しだけ子どもっぽく、絵文字は使いません。',
@@ -176,7 +182,7 @@ ipcMain.handle('chat:history', () =>
 
 async function chat(userText) {
   try {
-    const text = await askGemini(buildContents(history, userText));
+    const { text, sources } = await askGemini(buildContents(history, userText));
     history.push(
       { role: 'user', content: userText, at: Date.now() },
       { role: 'assistant', content: text, at: Date.now() },
@@ -185,11 +191,21 @@ async function chat(userText) {
     // 履歴が伸びすぎないよう、古い方から捨てる（直近20往復ぶん）
     if (history.length > HISTORY_MAX_TURNS * 2) history = history.slice(-HISTORY_MAX_TURNS * 2);
 
-    return { ok: true, text };
+    return { ok: true, text, sources };
   } catch (err) {
-    return { ok: false, text: describeError(err) };
+    return { ok: false, text: describeError(err), sources: [] };
   }
 }
+
+// 出典のリンクは既定のブラウザで開く。http(s) 以外は開かない
+ipcMain.on('link:open', (_event, url) => {
+  try {
+    const { protocol } = new URL(String(url));
+    if (protocol === 'https:' || protocol === 'http:') shell.openExternal(String(url));
+  } catch {
+    // URL として読めないものは無視する
+  }
+});
 
 /** 今日の直近の会話に新しい発言を足して、Gemini に送る contents の形にする */
 function buildContents(pastMessages, userText) {
@@ -218,7 +234,11 @@ class GeminiError extends Error {
   }
 }
 
-/** Gemini API を呼んで、返事の本文だけを返す */
+/**
+ * Gemini API を呼んで、返事の本文と出典を返す。
+ * Google 検索を道具として渡しておき、検索するかどうかはモデルが決める。
+ * @returns {Promise<{ text: string, sources: { title: string, uri: string }[] }>}
+ */
 async function askGemini(contents) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new GeminiError('no-key', 'GEMINI_API_KEY が設定されていません');
@@ -232,6 +252,7 @@ async function askGemini(contents) {
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: buildSystemPrompt() }] },
         contents,
+        tools: [{ google_search: {} }],
       }),
       signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
     });
@@ -272,7 +293,23 @@ async function askGemini(contents) {
     );
   }
 
-  return text;
+  return { text, sources: extractSources(candidate?.groundingMetadata) };
+}
+
+/**
+ * 検索を使った返事なら、groundingMetadata から出典（サイト名とリンク）を取り出す。
+ * 同じサイトが何度も出てくるので名前でまとめ、先頭から数件だけにする。
+ * リンクは Google の転送用 URL で、開くと元のページに移る。
+ */
+function extractSources(groundingMetadata) {
+  const sources = [];
+  for (const chunk of groundingMetadata?.groundingChunks ?? []) {
+    const { title, uri } = chunk.web ?? {};
+    if (!uri || sources.some((source) => source.title === title)) continue;
+    sources.push({ title: title || 'リンク', uri });
+    if (sources.length >= SOURCES_MAX) break;
+  }
+  return sources;
 }
 
 function describeError(err) {
@@ -283,7 +320,7 @@ function describeError(err) {
     case 'bad-key':
       return 'APIキーが正しくないみたい。GEMINI_API_KEY を確かめてね。';
     case 'rate-limit':
-      return 'ちょっと喋りすぎたみたい。少し待ってからまた話しかけて。';
+      return '喋りすぎたか、検索の利用上限に達したかもしれない。少し待ってからまた話しかけて。';
     case 'blocked':
       return 'ごめん、その話にはうまく答えられないみたい。';
     case 'network':

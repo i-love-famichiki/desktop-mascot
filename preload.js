@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld('mascot', {
   fitHeight: (height) => ipcRenderer.send('window:fit-height', height),
   setClickThrough: (enabled) => ipcRenderer.send('window:click-through', enabled),
   showMenu: () => ipcRenderer.send('menu:show'),
+  openLink: (url) => ipcRenderer.send('link:open', url),
   getHistory: () => ipcRenderer.invoke('chat:history'),
   onShowHistory: (callback) => {
     const listener = () => callback();

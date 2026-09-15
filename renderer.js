@@ -32,11 +32,13 @@ mascotImgEl.addEventListener('error', () => {
 // 吹き出し
 // ---------------------------------------------------------------------------
 const bubbleRestoreEl = document.getElementById('bubble-restore');
+const bubbleSourcesEl = document.getElementById('bubble-sources');
 
-function say(text, { keep = false } = {}) {
+function say(text, { keep = false, sources = [] } = {}) {
   clearTimeout(hideTimer);
   bubbleTextEl.textContent = text;
   bubbleTextEl.scrollTop = 0;
+  showSources(sources);
   bubbleEl.classList.remove('hidden', 'minimized', 'history');
   bubbleRestoreEl.textContent = '返事を見る';
   if (!keep) {
@@ -48,6 +50,27 @@ function say(text, { keep = false } = {}) {
 function hideBubble() {
   bubbleEl.classList.add('hidden');
   bubbleEl.classList.remove('thinking', 'minimized', 'history');
+}
+
+// 検索を使った返事の出典。サイト名を押すと既定のブラウザで開く
+function showSources(sources) {
+  bubbleSourcesEl.replaceChildren();
+  bubbleSourcesEl.hidden = sources.length === 0;
+  if (sources.length === 0) return;
+
+  bubbleSourcesEl.append('出典: ');
+  sources.forEach((source, index) => {
+    if (index > 0) bubbleSourcesEl.append('、');
+    const link = document.createElement('a');
+    link.href = '#';
+    link.textContent = source.title;
+    link.title = 'ブラウザで開く';
+    link.addEventListener('click', (event) => {
+      event.preventDefault();
+      window.mascot.openLink(source.uri);
+    });
+    bubbleSourcesEl.append(link);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -66,6 +89,7 @@ async function showHistory() {
 
   clearTimeout(hideTimer);
   bubbleTextEl.replaceChildren(...messages.map(renderHistoryItem));
+  showSources([]);
   bubbleEl.classList.remove('hidden', 'minimized');
   bubbleEl.classList.add('history');
   bubbleRestoreEl.textContent = '履歴を見る';
@@ -152,6 +176,44 @@ fitObserver.observe(inputRowEl);
 fitObserver.observe(mascotEl);
 
 // ---------------------------------------------------------------------------
+// たまに転がる
+// ---------------------------------------------------------------------------
+// 何もしていないとき（吹き出しも入力欄も出ていない・ドラッグ中でない）だけ、
+// ときどき左右どちらかへ転がって元の場所に戻る。動きそのものは style.css
+const ROLL_INTERVAL_MIN_MS = 30 * 1000;
+const ROLL_INTERVAL_MAX_MS = 90 * 1000;
+
+function scheduleRoll() {
+  const delay = ROLL_INTERVAL_MIN_MS + Math.random() * (ROLL_INTERVAL_MAX_MS - ROLL_INTERVAL_MIN_MS);
+  setTimeout(() => {
+    startRoll();
+    scheduleRoll();
+  }, delay);
+}
+
+function startRoll() {
+  const idle =
+    !busy &&
+    !pointerDownAt &&
+    bubbleEl.classList.contains('hidden') &&
+    inputRowEl.classList.contains('hidden');
+  if (!idle || mascotEl.classList.contains('rolling')) return;
+
+  mascotEl.style.setProperty('--roll', Math.random() < 0.5 ? '-1' : '1');
+  mascotEl.classList.add('rolling');
+}
+
+function stopRoll() {
+  mascotEl.classList.remove('rolling');
+}
+
+mascotEl.addEventListener('animationend', (event) => {
+  if (event.animationName === 'roll-move') stopRoll();
+});
+
+scheduleRoll();
+
+// ---------------------------------------------------------------------------
 // ドラッグ移動（クリックと区別するため、動いた距離でしきい値を取る）
 // ---------------------------------------------------------------------------
 const DRAG_THRESHOLD = 4;
@@ -160,6 +222,8 @@ let dragging = false;
 
 mascotEl.addEventListener('mousedown', (event) => {
   if (event.button !== 0) return;
+  // 転がっている途中で掴まれたら、その場で転がるのをやめる
+  stopRoll();
   pointerDownAt = { x: event.screenX, y: event.screenY };
   dragging = false;
   window.mascot.dragStart();
@@ -289,14 +353,16 @@ async function ask(text) {
   streamed = '';
   clearTimeout(hideTimer);
   bubbleTextEl.textContent = '';
+  showSources([]);
   bubbleEl.classList.remove('hidden', 'minimized', 'history');
   bubbleEl.classList.add('thinking');
   mascotEl.classList.add('talking');
 
   try {
     const result = await window.mascot.send(text);
-    // 失敗時はエラー文が入る。読み返せるよう、次に話しかけるかクリックするまで残す
-    say(result.text, { keep: true });
+    // 失敗時はエラー文が入る。読み返せるよう、次に話しかけるか×を押すまで残す。
+    // Google 検索を使った返事なら出典も添える
+    say(result.text, { keep: true, sources: result.sources ?? [] });
   } finally {
     busy = false;
     streamed = '';

@@ -79,6 +79,23 @@ body {
   display: none;
 }
 
+/* 検索を使った返事の出典 */
+#bubble-sources {
+  margin: 6px 0 0;
+  padding-top: 6px;
+  border-top: 1px dashed rgba(0, 0, 0, 0.2);
+  font-size: 11px;
+  line-height: 1.5;
+  color: #777;
+  word-break: break-word;
+}
+
+#bubble-sources a {
+  color: #3f7fb0;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 /* 会話の履歴。1発言ずつ、誰がいつ言ったかを小さく添える */
 .history-item {
   display: block;
@@ -121,6 +138,7 @@ body {
 }
 
 #bubble.minimized #bubble-text,
+#bubble.minimized #bubble-sources,
 #bubble.minimized .bubble-button {
   display: none;
 }
@@ -232,6 +250,41 @@ body {
 #mascot.has-image.talking #mascot-img {
   transform-origin: 50% 90%;
   animation: rock 0.6s ease-in-out infinite;
+}
+
+/* たまに転がる。左右どちらかへ転がって少し止まり、転がって元の場所に戻る。
+   向きは renderer.js が --roll（1 か -1）で決める。
+   豆の周りの長さはおよそ 120px なので、半回転（寝た向きで止まる）で 60px 進む */
+#mascot.rolling {
+  animation: roll-move 3.2s ease-in-out;
+}
+
+#mascot.rolling .roller {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: roll-turn 3.2s ease-in-out;
+}
+
+@keyframes roll-move {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  40%,
+  60% {
+    transform: translateX(calc(var(--roll, 1) * 60px));
+  }
+}
+
+@keyframes roll-turn {
+  0%,
+  100% {
+    transform: rotate(0deg);
+  }
+  40%,
+  60% {
+    transform: rotate(calc(var(--roll, 1) * 180deg));
+  }
 }
 
 @keyframes rock {
