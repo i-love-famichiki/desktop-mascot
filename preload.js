@@ -15,6 +15,11 @@ contextBridge.exposeInMainWorld('mascot', {
   dragEnd: () => ipcRenderer.send('drag:end'),
   fitHeight: (height) => ipcRenderer.send('window:fit-height', height),
   setClickThrough: (enabled) => ipcRenderer.send('window:click-through', enabled),
+  onHidden: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on('window:hidden', listener);
+    return () => ipcRenderer.removeListener('window:hidden', listener);
+  },
   showMenu: () => ipcRenderer.send('menu:show'),
   openLink: (url) => ipcRenderer.send('link:open', url),
   getHistory: () => ipcRenderer.invoke('chat:history'),

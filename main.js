@@ -130,19 +130,72 @@ function createWindow() {
   // マスコットや吹き出しの上に来たらレンダラーが受け付けに切り替える
   win.setIgnoreMouseEvents(true, { forward: true });
   win.loadFile('index.html');
+
+  // 「隠す／表示」のメニューの文字を合わせる
+  win.on('show', refreshTrayMenu);
+  win.on('hide', refreshTrayMenu);
+  refreshTrayMenu();
 }
+
+// ---------------------------------------------------------------------------
+// 表示／非表示（終了せずに引っ込める）
+// ---------------------------------------------------------------------------
+/** マスコットを出す。自動起動の待ち時間中なら、待たずにすぐ出す */
+function showMascot() {
+  if (!win) {
+    createWindow();
+    return;
+  }
+  win.show();
+  // 隠している間に外れることがあるので、一番手前に出す指定をかけ直す
+  win.setAlwaysOnTop(true, 'screen-saver');
+}
+
+function hideMascot() {
+  if (!win) return;
+  win.hide();
+  // 隠すとマウスはもう上に無いので、次に出したとき透明な所が素通りになるよう戻しておく
+  win.setIgnoreMouseEvents(true, { forward: true });
+  win.webContents.send('window:hidden');
+}
+
+function toggleMascot() {
+  if (win?.isVisible()) hideMascot();
+  else showMascot();
+}
+
+// 隠したまま忘れて、もう一度起動しようとしたときは、隠れているマスコットを出す
+app.on('second-instance', () => {
+  if (app.isReady()) showMascot();
+});
 
 function createTray() {
   // アイコンは後で差し替える。空でもトレイには載る。
   tray = new Tray(path.join(__dirname, 'assets', 'tray.png'));
-  tray.setToolTip('Desktop Mascot');
+  tray.setToolTip('Desktop Mascot（クリックで表示／非表示）');
   tray.setContextMenu(buildMenu());
+  // 左クリックで隠す／表示を切り替える（右クリックはメニュー）
+  tray.on('click', toggleMascot);
+}
+
+/** トレイのメニューは作った時点の表示を持っているので、状態が変わったら作り直す */
+function refreshTrayMenu() {
+  tray?.setContextMenu(buildMenu());
 }
 
 /** トレイと、マスコットの右クリックで共通のメニュー */
 function buildMenu() {
   return Menu.buildFromTemplate([
-    { label: '会話の履歴を見る', click: () => win?.webContents.send('history:show') },
+    { label: win?.isVisible() ? 'マスコットを隠す' : 'マスコットを表示', click: toggleMascot },
+    { type: 'separator' },
+    {
+      label: '会話の履歴を見る',
+      click: () => {
+        if (!win) return;
+        showMascot();
+        win.webContents.send('history:show');
+      },
+    },
     { label: '会話をリセット', click: confirmReset },
     { type: 'separator' },
     {
@@ -164,8 +217,7 @@ function setOpenAtLogin(enabled) {
   settings = { ...settings, openAtLogin: enabled };
   saveSettings(settingsFile, settings);
   applyOpenAtLogin();
-  // トレイのメニューは作った時点のチェック状態を持っているので作り直す
-  tray?.setContextMenu(buildMenu());
+  refreshTrayMenu();
 }
 
 /**
@@ -218,7 +270,8 @@ app.whenReady().then(async () => {
     console.log(`[startup] 自動起動なので ${AUTOSTART_DELAY_MS / 1000} 秒待ってから表示します`);
     await new Promise((resolve) => setTimeout(resolve, AUTOSTART_DELAY_MS));
   }
-  createWindow();
+  // 待っている間にトレイから「表示」を押されていたら、もう出ている
+  if (!win) createWindow();
   console.log('[startup] マスコットを表示しました');
 
   // 7日より前の会話の要約は、起動時に1回だけ行う。終わるのを待たずに会話できる
