@@ -36,7 +36,7 @@ const GEMINI_TIMEOUT_MS = 30 * 1000;
 // 吹き出しに添える出典の数の上限（小さい吹き出しなので少なめに）
 const SOURCES_MAX = 3;
 
-// 送る会話履歴の上限（今日の直近20往復まで）
+// 送る会話履歴の上限（今日の直近20往復まで）。昨日より前の会話は、システムプロンプトに短く入れる
 const HISTORY_MAX_TURNS = 20;
 // 1回の発言も長すぎると文脈を圧迫するので上限を設けておく
 const USER_TEXT_MAX_CHARS = 2000;
@@ -74,6 +74,7 @@ function buildSystemPrompt() {
     '名前はまだありません。ユーザーが名前をくれたら喜んで受け取ってください。',
     '口調は親しみやすく、少しだけ子どもっぽく、絵文字は使いません。',
     '返事は必ず日本語で、基本は2〜3文の短さに収めてください。画面の小さな吹き出しに表示されます。',
+    ...pastDaysPromptLines(),
     ...memoryPromptLines(),
   ].join('\n');
 }
@@ -99,6 +100,21 @@ function describeElapsed(ms) {
 function formatMessageTime(at) {
   const d = new Date(at);
   return `${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+// 昨日から6日前までの詳しい会話。今日の会話は contents で送るので、ここには入れない
+function pastDaysPromptLines() {
+  const messages = store.pastDaysMessages();
+  if (messages.length === 0) return [];
+  return [
+    '',
+    '以下は、昨日より前の最近の会話（新しい方の一部）です。',
+    '「昨日話したこと」など、今の話題に関係があるときに参考にしてください。関係がなければ自分から持ち出さないでください。',
+    ...messages.map((message) => {
+      const speaker = message.role === 'user' ? 'ユーザー' : 'あなた';
+      return `[${formatMessageTime(message.at)}] ${speaker}: ${message.content.replace(/\s*\n\s*/g, ' ')}`;
+    }),
+  ];
 }
 
 // 7日より前の会話は要約だけが残っている。話題に関係があるときだけ使ってもらう

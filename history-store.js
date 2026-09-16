@@ -22,6 +22,10 @@ const RETAIN_DAYS = 7;
 // システムプロンプトに入れる要約の上限。毎回送るので短めにしておく
 const PROMPT_SUMMARIES_MAX = 30;
 const PROMPT_SUMMARIES_MAX_CHARS = 2000;
+// 昨日から6日前までの詳しい会話も、新しいものから合計この文字数まで返事に使う。
+// 1回の発言が長すぎると枠を使い切ってしまうので、1発言ごとにも短く切る
+const PAST_DAYS_MAX_CHARS = 4000;
+const PAST_MESSAGE_MAX_CHARS = 300;
 
 /** ローカル時刻での日付（YYYY-MM-DD） */
 function dateKey(at) {
@@ -266,6 +270,29 @@ class HistoryStore {
       summarizedDays.push(date);
     }
     return { summarizedDays, failedDay: null };
+  }
+
+  /**
+   * 昨日より前（要約されていない直近7日のうち、今日より前）の詳しい会話を、
+   * 新しいものから合計 PAST_DAYS_MAX_CHARS 文字まで、時刻の古い順に返す。
+   * 長い発言は PAST_MESSAGE_MAX_CHARS 文字で切る。
+   * @param {number} [now] テスト用に日時を差し替えられる
+   */
+  pastDaysMessages(now = Date.now()) {
+    const startOfToday = new Date(now).setHours(0, 0, 0, 0);
+    const picked = [];
+    let chars = 0;
+    for (const message of [...this.messages].reverse()) {
+      if (message.at >= startOfToday) continue;
+      const content =
+        message.content.length > PAST_MESSAGE_MAX_CHARS
+          ? `${message.content.slice(0, PAST_MESSAGE_MAX_CHARS)}…`
+          : message.content;
+      if (chars + content.length > PAST_DAYS_MAX_CHARS) break;
+      picked.unshift({ ...message, content });
+      chars += content.length;
+    }
+    return picked;
   }
 
   /** システムプロンプトに入れる、要約の短い一覧（新しいものから上限まで）。無ければ空文字 */

@@ -167,6 +167,32 @@ test('システムプロンプト用の要約は、全体で2000文字を超え�
 // ほかの PC との共有（2 つの HistoryStore が同じファイルを使う）
 // ---------------------------------------------------------------------------
 
+test('昨日より前の会話: 今日の分は含めず、時刻の古い順に並ぶ', () => {
+  const store = new HistoryStore(tempFile());
+  store.messages = [
+    say('user', '10日の話', at(9, 10)),
+    say('assistant', '10日の返事', at(9, 10, 10, 1)),
+    say('user', '昨日の夜の話', at(9, 14, 23, 59)),
+    say('user', '今日の話', at(9, 15, 0, 0)),
+  ];
+  assert.deepEqual(
+    store.pastDaysMessages(NOW).map((m) => m.content),
+    ['10日の話', '10日の返事', '昨日の夜の話'],
+  );
+});
+
+test('昨日より前の会話: 長い発言は300文字で切り、全体は新しいものから4000文字まで', () => {
+  const store = new HistoryStore(tempFile());
+  store.messages = Array.from({ length: 20 }, (_, i) => say('user', `${i}`.padEnd(500, 'あ'), at(9, 14, 10, i)));
+  const past = store.pastDaysMessages(NOW);
+  assert.equal(past.length, 13);
+  assert.ok(past.every((m) => m.content.length === 301 && m.content.endsWith('…')));
+  assert.ok(past[0].content.startsWith('7'));
+  assert.ok(past.at(-1).content.startsWith('19'));
+  // 元の履歴は切られていない
+  assert.equal(store.messages[19].content.length, 500);
+});
+
 test('共有: 2 台が交互に話しても、どちらの発言も消えない', async () => {
   const file = tempFile();
   const pcA = new HistoryStore(file);
