@@ -65,11 +65,37 @@ function buildSystemPrompt() {
     '天気、ニュース、最近の出来事など新しい情報が必要なときは、Google 検索で調べてから答えてください。',
     '場所によって答えが変わる質問（天気など）で場所が分からないときは、短く聞き返してください。',
     `現在の日時は ${now} です。`,
+    ...elapsedPromptLines(),
+    'ユーザーの発言の先頭にある [9月16日 21:33] のような表記は、その発言をした日時です。',
+    '「さっき」「朝に話した」などの時間の感覚に使ってください。返事には、この日時の表記を付けないでください。',
     '名前はまだありません。ユーザーが名前をくれたら喜んで受け取ってください。',
     '口調は親しみやすく、少しだけ子どもっぽく、絵文字は使いません。',
     '返事は必ず日本語で、基本は2〜3文の短さに収めてください。画面の小さな吹き出しに表示されます。',
     ...memoryPromptLines(),
   ].join('\n');
+}
+
+// 前回の会話からどれくらいたったか。「久しぶり」「さっきの続き」を判断できるようにする
+function elapsedPromptLines() {
+  const last = store.messages.at(-1);
+  if (!last) return ['ユーザーと話すのは、今回が初めてか、しばらくぶりです。'];
+  return [`前回ユーザーと話したのは ${describeElapsed(Date.now() - last.at)}（${formatMessageTime(last.at)}）です。`];
+}
+
+/** 経過時間を「5分前」「3時間前」「2日前」のように言い表す */
+function describeElapsed(ms) {
+  const minutes = Math.floor(ms / 60000);
+  if (minutes < 1) return 'たった今';
+  if (minutes < 60) return `${minutes}分前`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}時間前`;
+  return `${Math.floor(hours / 24)}日前`;
+}
+
+/** 発言の日時を「9月16日 21:33」の形にする */
+function formatMessageTime(at) {
+  const d = new Date(at);
+  return `${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
 // 7日より前の会話は要約だけが残っている。話題に関係があるときだけ使ってもらう
@@ -551,17 +577,20 @@ async function summarizeDay(date, messages) {
 }
 
 /** 今日の直近の会話に新しい発言を足して、Gemini に送る contents の形にする */
+// ユーザーの発言にだけ、話した日時を先頭に付けて送る（保存している会話には付けない）。
+// まめの返事に付けると、まねして返事に日時を書き始めることがあるので付けない
 function buildContents(pastMessages, userText) {
   const startOfToday = new Date().setHours(0, 0, 0, 0);
+  const withTime = (text, at) => `[${formatMessageTime(at)}] ${text}`;
   return [
     ...pastMessages
       .filter((message) => message.at >= startOfToday)
       .slice(-HISTORY_MAX_TURNS * 2)
       .map((message) => ({
         role: message.role === 'user' ? 'user' : 'model',
-        parts: [{ text: message.content }],
+        parts: [{ text: message.role === 'user' ? withTime(message.content, message.at) : message.content }],
       })),
-    { role: 'user', parts: [{ text: userText }] },
+    { role: 'user', parts: [{ text: withTime(userText, Date.now()) }] },
   ];
 }
 
