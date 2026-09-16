@@ -12,7 +12,11 @@ const AUTOSTART_DELAY_MS = 15 * 1000;
 // レジストリ（HKCU\...\CurrentVersion\Run）に書く名前
 const LOGIN_ITEM_NAME = 'DesktopMascot';
 
-// 自動起動と手動の npm start が重なっても、マスコットは1つだけにする
+// アプリ用の保存場所（%APPDATA%\Desktop Mascot）を、開発中（npm start）と exe で揃える。
+// 「マスコットは1つだけ」の決まりはこのフォルダ単位なので、揃えると両方にまたがって効く
+app.setPath('userData', path.join(app.getPath('appData'), 'Desktop Mascot'));
+
+// 自動起動と手動の起動が重なっても、マスコットは1つだけにする
 if (!app.requestSingleInstanceLock()) {
   app.quit();
   return;
@@ -84,18 +88,22 @@ let win = null;
 /** @type {Tray | null} */
 let tray = null;
 
-// 会話履歴はメインプロセスだけが持ち、data/history.json に保存する（終了しても消えない）。
+// 会話履歴と設定の保存先。exe ではアプリのフォルダに書き込めないことがあるので
+// アプリ用の保存場所に置く。開発中（npm start）は今まで通りプロジェクトの data/ に置く
+const dataDir = app.isPackaged ? app.getPath('userData') : path.join(__dirname, 'data');
+
+// 会話履歴はメインプロセスだけが持ち、history.json に保存する（終了しても消えない）。
 // テストのときは環境変数 MASCOT_HISTORY_FILE で保存先を差し替えられる。
 const store = new HistoryStore(
   process.env.MASCOT_HISTORY_FILE
     ? path.resolve(process.env.MASCOT_HISTORY_FILE)
-    : path.join(__dirname, 'data', 'history.json'),
+    : path.join(dataDir, 'history.json'),
 );
 
 // 設定（自動起動の ON/OFF など）。テストのときは MASCOT_SETTINGS_FILE で差し替えられる
 const settingsFile = process.env.MASCOT_SETTINGS_FILE
   ? path.resolve(process.env.MASCOT_SETTINGS_FILE)
-  : path.join(__dirname, 'data', 'settings.json');
+  : path.join(dataDir, 'settings.json');
 let settings = loadSettings(settingsFile);
 
 // ウィンドウの基本の高さ。長い返事のときだけ一時的に上へ伸ばす
@@ -225,13 +233,17 @@ function setOpenAtLogin(enabled) {
  * 起動のたびに呼び、フォルダを移したときなどもここで登録し直す。
  */
 function applyOpenAtLogin() {
-  // exe 化前は electron.exe にプロジェクトフォルダを渡して起動する形で登録する
-  const args = app.isPackaged ? [AUTOSTART_ARG] : [__dirname, AUTOSTART_ARG];
+  // 開発中（npm start）に登録すると、インストールした exe の登録を electron.exe で
+  // 上書きしてしまうので、登録は exe のときだけ行う
+  if (!app.isPackaged) {
+    console.log('[startup] 開発中なので自動起動の登録は変えません');
+    return;
+  }
   app.setLoginItemSettings({
     openAtLogin: settings.openAtLogin,
     name: LOGIN_ITEM_NAME,
     path: process.execPath,
-    args,
+    args: [AUTOSTART_ARG],
   });
 }
 

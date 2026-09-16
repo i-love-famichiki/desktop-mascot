@@ -1,19 +1,54 @@
 {
   "name": "desktop-mascot",
   "version": "1.0.0",
-  "description": "",
+  "description": "デスクトップに住む枝豆のマスコット",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "test": "node --test test/*.test.js",
-    "mock-history": "node test/make-mock-history.js"
+    "mock-history": "node test/make-mock-history.js",
+    "icon": "node build/make-icon.js",
+    "dist": "electron-builder --win"
   },
   "keywords": [],
-  "author": "",
+  "author": "i-love-famichiki",
   "license": "ISC",
   "type": "commonjs",
   "devDependencies": {
     "electron": "^44.3.0",
+    "electron-builder": "^26.15.3",
     "sharp": "^0.35.4"
+  },
+  "build": {
+    "appId": "com.i-love-famichiki.desktop-mascot",
+    "productName": "Desktop Mascot",
+    "electronDist": "node_modules/electron/dist",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer.js",
+      "index.html",
+      "style.css",
+      "history-store.js",
+      "settings.js",
+      "assets/**"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "runAfterFinish": true,
+      "createDesktopShortcut": false,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Desktop Mascot",
+      "artifactName": "DesktopMascot-Setup-${version}.${ext}"
+    }
   }
 }
