@@ -14,6 +14,14 @@
         <p id="bubble-text"></p>
         <!-- Google 検索を使った返事のときだけ、出典のリンクを並べる -->
         <p id="bubble-sources" hidden></p>
+        <!-- Google 検索を使った返事のときだけ、Google の規約で求められている「検索候補」を出す。
+             Google が作った HTML をそのまま、スクリプトの動かない枠の中に表示する（renderer.js の showSearchSuggestions） -->
+        <iframe
+          id="bubble-search"
+          title="Google 検索の候補"
+          sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+          hidden
+        ></iframe>
         <!-- 小さくしたときだけ出る。押すと元に戻る -->
         <button id="bubble-restore" type="button">返事を見る</button>
       </div>

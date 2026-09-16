@@ -97,6 +97,20 @@ body {
   cursor: pointer;
 }
 
+/* Google 検索の候補（中身は Google が作った HTML。見た目は変えない） */
+#bubble-search {
+  display: block;
+  width: 100%;
+  height: 0;
+  margin: 6px 0 0;
+  border: 0;
+  background: transparent;
+}
+
+#bubble-search[hidden] {
+  display: none;
+}
+
 /* 会話の履歴。1発言ずつ、誰がいつ言ったかを小さく添える */
 .history-item {
   display: block;
@@ -149,6 +163,7 @@ body {
 
 #bubble.minimized #bubble-text,
 #bubble.minimized #bubble-sources,
+#bubble.minimized #bubble-search,
 #bubble.minimized .bubble-button {
   display: none;
 }

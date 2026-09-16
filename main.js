@@ -147,6 +147,14 @@ function createWindow() {
   win.setIgnoreMouseEvents(true, { forward: true });
   win.loadFile('index.html');
 
+  // 検索候補の枠の中のリンクは新しいウィンドウとして開かれる。アプリの中では開かず、
+  // Google 検索のページだけを外部ブラウザに渡す
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (isGoogleSearchUrl(url)) shell.openExternal(url);
+    else console.warn('[link] 開かなかったリンク:', url);
+    return { action: 'deny' };
+  });
+
   // 「隠す／表示」のメニューの文字を合わせる
   win.on('show', refreshTrayMenu);
   win.on('hide', refreshTrayMenu);
@@ -499,16 +507,16 @@ ipcMain.handle('chat:history', () => ({
 
 async function chat(userText) {
   try {
-    const { text, sources } = await askGemini(buildContents(store.messages, userText));
+    const { text, sources, searchSuggestions } = await askGemini(buildContents(store.messages, userText));
     // 返事を表示するのに保存の完了は待たない（失敗しても store 側でログに出す）
     store.append(
       { role: 'user', content: userText, at: Date.now() },
       { role: 'assistant', content: text, at: Date.now() },
     ).catch(() => {});
 
-    return { ok: true, text, sources };
+    return { ok: true, text, sources, searchSuggestions };
   } catch (err) {
-    return { ok: false, text: describeError(err), sources: [] };
+    return { ok: false, text: describeError(err), sources: [], searchSuggestions: null };
   }
 }
 
@@ -629,7 +637,33 @@ async function askGemini(contents, { systemPrompt = buildSystemPrompt(), tools =
     );
   }
 
-  return { text, sources: extractSources(candidate?.groundingMetadata) };
+  return {
+    text,
+    sources: extractSources(candidate?.groundingMetadata),
+    searchSuggestions: extractSearchSuggestions(candidate?.groundingMetadata),
+  };
+}
+
+/**
+ * 検索を使った返事なら、Google の規約で表示が求められている「検索候補」を取り出す。
+ * html は Google が作った表示用の HTML（そのまま使う）、queries は実際に検索した言葉。
+ * 検索しなかった返事では null。
+ */
+function extractSearchSuggestions(groundingMetadata) {
+  const html = groundingMetadata?.searchEntryPoint?.renderedContent;
+  const queries = (groundingMetadata?.webSearchQueries ?? []).filter((q) => typeof q === 'string' && q.trim());
+  if (!html && queries.length === 0) return null;
+  return { html: typeof html === 'string' ? html : '', queries };
+}
+
+/** Google 検索の結果ページの URL か（検索候補のリンクはこれだけを開く） */
+function isGoogleSearchUrl(url) {
+  try {
+    const { protocol, hostname, pathname } = new URL(url);
+    return protocol === 'https:' && /^(www\.)?google\.[a-z.]+$/.test(hostname) && pathname === '/search';
+  } catch {
+    return false;
+  }
 }
 
 /**

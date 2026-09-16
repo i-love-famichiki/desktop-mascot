@@ -33,12 +33,14 @@ mascotImgEl.addEventListener('error', () => {
 // ---------------------------------------------------------------------------
 const bubbleRestoreEl = document.getElementById('bubble-restore');
 const bubbleSourcesEl = document.getElementById('bubble-sources');
+const bubbleSearchEl = document.getElementById('bubble-search');
 
-function say(text, { keep = false, sources = [] } = {}) {
+function say(text, { keep = false, sources = [], searchSuggestions = null } = {}) {
   clearTimeout(hideTimer);
   bubbleTextEl.replaceChildren(...linkify(text));
   bubbleTextEl.scrollTop = 0;
   showSources(sources);
+  showSearchSuggestions(searchSuggestions);
   bubbleEl.classList.remove('hidden', 'minimized', 'history');
   bubbleRestoreEl.textContent = '返事を見る';
   if (!keep) {
@@ -63,6 +65,38 @@ function showSources(sources) {
     if (index > 0) bubbleSourcesEl.append('、');
     bubbleSourcesEl.append(createLink(source.title, source.uri));
   });
+}
+
+// Google 検索を使った返事の「検索候補」。Google の規約で表示が求められている。
+// Google が作った HTML（スタイル付き）は変えずにそのまま枠の中へ入れる。
+// 枠はスクリプトを動かせず、リンクは新しいウィンドウ扱いにして、メイン側で外部ブラウザに渡す
+function showSearchSuggestions(suggestions) {
+  const html = suggestions?.html || buildSuggestionChips(suggestions?.queries ?? []);
+  bubbleSearchEl.hidden = !html;
+  bubbleSearchEl.style.height = '0';
+  if (!html) {
+    bubbleSearchEl.removeAttribute('srcdoc');
+    return;
+  }
+  // <base target="_blank"> でリンクを枠の外（外部ブラウザ）で開かせる。body の余白だけ消す
+  bubbleSearchEl.srcdoc = `<!doctype html><meta charset="utf-8"><base target="_blank"><style>body{margin:0}</style>${html}`;
+}
+
+// 枠の中身の高さに合わせる（吹き出しの高さが変わるとウィンドウの高さも合わせ直される）
+bubbleSearchEl.addEventListener('load', () => {
+  const doc = bubbleSearchEl.contentDocument;
+  if (!doc || bubbleSearchEl.hidden) return;
+  bubbleSearchEl.style.height = `${doc.documentElement.scrollHeight}px`;
+});
+
+// renderedContent が無いのに検索語だけあるときの代わり。Google 検索へのリンクを並べる
+function buildSuggestionChips(queries) {
+  if (queries.length === 0) return '';
+  const escape = (text) => text.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+  const chips = queries
+    .map((query) => `<a href="https://www.google.com/search?q=${encodeURIComponent(query)}" style="display:inline-block;margin:2px 4px 2px 0;padding:3px 10px;border:1px solid #d2d2d2;border-radius:14px;color:#5e5e5e;text-decoration:none;font:12px sans-serif;background:#fff">${escape(query)}</a>`)
+    .join('');
+  return `<div style="font:11px sans-serif;color:#777;margin-bottom:2px">Google 検索の候補</div>${chips}`;
 }
 
 // 押すと既定のブラウザで開くリンク（吹き出しの中では画面を移動させない）
@@ -125,6 +159,7 @@ async function showHistory() {
     ...messages.map(renderHistoryItem),
   );
   showSources([]);
+  showSearchSuggestions(null);
   bubbleEl.classList.remove('hidden', 'minimized');
   bubbleEl.classList.add('history');
   bubbleRestoreEl.textContent = '履歴を見る';
@@ -410,6 +445,7 @@ async function ask(text) {
   clearTimeout(hideTimer);
   bubbleTextEl.textContent = '';
   showSources([]);
+  showSearchSuggestions(null);
   bubbleEl.classList.remove('hidden', 'minimized', 'history');
   bubbleEl.classList.add('thinking');
   mascotEl.classList.add('talking');
@@ -418,7 +454,7 @@ async function ask(text) {
     const result = await window.mascot.send(text);
     // 失敗時はエラー文が入る。読み返せるよう、次に話しかけるか×を押すまで残す。
     // Google 検索を使った返事なら出典も添える
-    say(result.text, { keep: true, sources: result.sources ?? [] });
+    say(result.text, { keep: true, sources: result.sources ?? [], searchSuggestions: result.searchSuggestions });
   } finally {
     busy = false;
     streamed = '';
