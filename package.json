@@ -48,7 +48,7 @@
       "createDesktopShortcut": false,
       "createStartMenuShortcut": true,
       "shortcutName": "Desktop Mascot",
-      "artifactName": "DesktopMascot-Setup-${version}.${ext}"
+      "artifactName": "DesktopMascot-Setup.${ext}"
     }
   }
 }
