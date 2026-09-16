@@ -162,3 +162,80 @@ test('システムプロンプト用の要約は、全体で2000文字を超え�
   assert.ok(text.length <= 2000 + 30, `長さ ${text.length}`);
   assert.ok(text.split('\n').length < 30);
 });
+
+// ---------------------------------------------------------------------------
+// ほかの PC との共有（2 つの HistoryStore が同じファイルを使う）
+// ---------------------------------------------------------------------------
+
+test('共有: 2 台が交互に話しても、どちらの発言も消えない', async () => {
+  const file = tempFile();
+  const pcA = new HistoryStore(file);
+  const pcB = new HistoryStore(file);
+  pcA.load();
+  pcB.load();
+
+  await pcA.append(say('user', 'A で話した', at(9, 15, 10)));
+  // B はまだ A の発言を読み込んでいないまま話す
+  await pcB.append(say('user', 'B で話した', at(9, 15, 11)));
+
+  const reloaded = new HistoryStore(file);
+  reloaded.load();
+  assert.deepEqual(reloaded.messages.map((m) => m.content), ['A で話した', 'B で話した']);
+});
+
+test('共有: sync でほかの PC の発言を取り込み、変わったかどうかを返す', async () => {
+  const file = tempFile();
+  const pcA = new HistoryStore(file);
+  const pcB = new HistoryStore(file);
+
+  await pcA.append(say('user', 'A で話した', at(9, 15, 10)));
+  assert.equal(await pcB.sync(), true);
+  assert.deepEqual(pcB.messages.map((m) => m.content), ['A で話した']);
+  assert.equal(await pcB.sync(), false, '2 回目は変わらない');
+});
+
+test('共有: 片方でリセットしたら、もう片方の古い発言は生き返らない', async () => {
+  const file = tempFile();
+  const pcA = new HistoryStore(file);
+  const pcB = new HistoryStore(file);
+  await pcA.append(say('user', '消したい話', Date.now() - 60_000));
+  await pcB.sync();
+
+  await pcA.clear();
+  // B はリセットを知らないまま、新しく話す
+  await pcB.append(say('user', 'リセット後の話', Date.now() + 1000));
+
+  const reloaded = new HistoryStore(file);
+  reloaded.load();
+  assert.deepEqual(reloaded.messages.map((m) => m.content), ['リセット後の話']);
+});
+
+test('共有: 片方で要約した日の発言は、もう片方から混ぜても戻らない', async () => {
+  const file = tempFile();
+  const pcA = new HistoryStore(file);
+  const pcB = new HistoryStore(file);
+  await pcA.append(say('user', '古い話', at(9, 1)));
+  await pcB.sync();
+
+  await pcA.compact(async () => '1日のまとめ', NOW);
+  await pcB.append(say('user', '今日の話', at(9, 15)));
+
+  const reloaded = new HistoryStore(file);
+  reloaded.load();
+  assert.deepEqual(reloaded.messages.map((m) => m.content), ['今日の話']);
+  assert.deepEqual(reloaded.summaries.map((s) => s.summary), ['1日のまとめ']);
+});
+
+test('共有: 保存先を移すと、移した先にあった履歴と混ざる', async () => {
+  const shared = tempFile();
+  const other = new HistoryStore(shared);
+  await other.append(say('user', 'ほかの PC の話', at(9, 15, 9)));
+
+  const store = new HistoryStore(tempFile());
+  await store.append(say('user', 'この PC の話', at(9, 15, 10)));
+  await store.moveTo(shared);
+
+  const reloaded = new HistoryStore(shared);
+  reloaded.load();
+  assert.deepEqual(reloaded.messages.map((m) => m.content), ['ほかの PC の話', 'この PC の話']);
+});

@@ -7,8 +7,12 @@
 //   {
 //     "version": 1,
 //     "messages":  [{ "role": "user" | "assistant", "content": "...", "at": 1757900000000 }],
-//     "summaries": [{ "date": "2026-09-01", "summary": "...", "createdAt": 1757900000000 }]
+//     "summaries": [{ "date": "2026-09-01", "summary": "...", "createdAt": 1757900000000 }],
+//     "clearedAt": 1757900000000   // 最後に「会話をリセット」した時刻（無ければ 0）
 //   }
+//
+// ほかの PC と同じファイルを使って会話を共有できる（Google ドライブなどのフォルダに置く）。
+// 保存のたびにファイルの中身と混ぜてから書くので、ほかの PC で足された発言を消さない。
 
 const fs = require('fs');
 const path = require('path');
@@ -47,6 +51,47 @@ function isSummary(value) {
   return value && typeof value.date === 'string' && typeof value.summary === 'string';
 }
 
+/** ファイルの中身（JSON を読んだもの）から、使える部分だけを取り出す */
+function normalize(data) {
+  return {
+    messages: (Array.isArray(data?.messages) ? data.messages : []).filter(isMessage),
+    summaries: (Array.isArray(data?.summaries) ? data.summaries : []).filter(isSummary),
+    clearedAt: Number.isFinite(data?.clearedAt) ? data.clearedAt : 0,
+  };
+}
+
+/**
+ * 2 つの履歴（この PC の分と、ファイルにあったほかの PC の分）を混ぜる。
+ * - 同じ発言（時刻・話し手・中身が同じ）は 1 つにまとめる
+ * - どちらかでリセットしていたら、その時刻より前の発言と要約は消す
+ * - 同じ日の要約が 2 つあれば新しい方を残し、要約済みの日の発言は消す
+ * 先に渡した方（この PC の分）の発言はそのままのオブジェクトで残る。
+ */
+function mergeHistory(local, remote) {
+  const clearedAt = Math.max(local.clearedAt, remote.clearedAt);
+
+  const byDate = new Map();
+  for (const summary of [...remote.summaries, ...local.summaries]) {
+    const current = byDate.get(summary.date);
+    if (!current || (summary.createdAt ?? 0) >= (current.createdAt ?? 0)) byDate.set(summary.date, summary);
+  }
+  const summaries = [...byDate.values()]
+    .filter((summary) => clearedAt === 0 || (summary.createdAt ?? 0) >= clearedAt)
+    .sort((a, b) => a.date.localeCompare(b.date));
+  const summarizedDays = new Set(summaries.map((summary) => summary.date));
+
+  const byKey = new Map();
+  for (const message of [...local.messages, ...remote.messages]) {
+    const key = `${message.at}|${message.role}|${message.content}`;
+    if (!byKey.has(key)) byKey.set(key, message);
+  }
+  const messages = [...byKey.values()]
+    .filter((message) => message.at >= clearedAt && !summarizedDays.has(dateKey(message.at)))
+    .sort((a, b) => a.at - b.at);
+
+  return { messages, summaries, clearedAt };
+}
+
 class HistoryStore {
   /** @param {string} filePath 保存先の JSON ファイル */
   constructor(filePath) {
@@ -55,6 +100,8 @@ class HistoryStore {
     this.messages = [];
     /** @type {{ date: string, summary: string, createdAt: number }[]} */
     this.summaries = [];
+    // 最後にリセットした時刻。ほかの PC の古い発言を混ぜて生き返らせないために使う
+    this.clearedAt = 0;
     // 書き込みが重ならないよう、保存は1つずつ順番に行う
     this.saving = Promise.resolve();
     // ファイルはあるのに読めなかったときは、空の履歴で上書きしないよう保存を止める
@@ -75,9 +122,7 @@ class HistoryStore {
     }
 
     try {
-      const data = JSON.parse(raw);
-      this.messages = (Array.isArray(data.messages) ? data.messages : []).filter(isMessage);
-      this.summaries = (Array.isArray(data.summaries) ? data.summaries : []).filter(isSummary);
+      Object.assign(this, normalize(JSON.parse(raw)));
     } catch (err) {
       // 黙って上書きすると中身が失われるので、別名で残しておく
       const backup = `${this.filePath}.broken-${Date.now()}`;
@@ -85,7 +130,55 @@ class HistoryStore {
       console.error(`[history] 履歴ファイルが読めなかったので ${backup} に退避しました:`, err.message);
       this.messages = [];
       this.summaries = [];
+      this.clearedAt = 0;
     }
+  }
+
+  /**
+   * ファイルを読んで、今の中身と混ぜる（ほかの PC で足された発言を取り込む）。
+   * ファイルが無い・読めないときは何もしない。
+   * @returns {Promise<boolean>} 中身が変わったら true
+   */
+  sync() {
+    const run = async () => {
+      const remote = await this.readRemote();
+      if (!remote) return false;
+      const fingerprint = () => `${this.messages.length}/${this.summaries.length}/${this.clearedAt}`;
+      const before = fingerprint();
+      this.applyMerge(remote);
+      return fingerprint() !== before;
+    };
+    // 保存と同じ順番待ちに並べて、書いている途中のファイルを読まないようにする
+    const synced = this.saving.then(run);
+    this.saving = synced.catch((err) => console.error('[history] 読み込みに失敗しました:', err.message));
+    return synced;
+  }
+
+  /**
+   * 保存先を変える（共有フォルダに移すとき・共有をやめるとき）。
+   * 移した先にすでに履歴があれば混ぜて、今の中身を書き込む。
+   */
+  async moveTo(filePath) {
+    await this.saving.catch(() => {});
+    this.filePath = filePath;
+    this.saveDisabled = false;
+    await this.save();
+  }
+
+  /** ファイルを読む。無ければ null。読めない・壊れているときは例外 */
+  async readRemote() {
+    let raw;
+    try {
+      raw = await fs.promises.readFile(this.filePath, 'utf8');
+    } catch (err) {
+      if (err.code === 'ENOENT') return null;
+      throw err;
+    }
+    return normalize(JSON.parse(raw.replace(/^﻿/, '')));
+  }
+
+  applyMerge(remote) {
+    Object.assign(this, mergeHistory(this, remote));
   }
 
   /** 発言を足して保存する */
@@ -98,17 +191,32 @@ class HistoryStore {
   clear() {
     this.messages = [];
     this.summaries = [];
+    this.clearedAt = Date.now();
     return this.save();
   }
 
   save() {
     if (this.saveDisabled) return Promise.resolve();
-    const json = JSON.stringify(
-      { version: 1, messages: this.messages, summaries: this.summaries },
-      null,
-      2,
-    );
     const write = async () => {
+      // ほかの PC が同じファイルに書いているかもしれないので、先に読んで混ぜる。
+      // 読めないとき（ドライブの同期中など）は、ほかの PC の分を消さないよう書かずに失敗させる
+      let remote = null;
+      try {
+        remote = await this.readRemote();
+      } catch (err) {
+        if (err instanceof SyntaxError) {
+          console.error('[history] 保存先の履歴ファイルが壊れていたので、混ぜずに上書きします:', err.message);
+        } else {
+          throw err;
+        }
+      }
+      if (remote) this.applyMerge(remote);
+
+      const json = JSON.stringify(
+        { version: 1, messages: this.messages, summaries: this.summaries, clearedAt: this.clearedAt },
+        null,
+        2,
+      );
       await fs.promises.mkdir(path.dirname(this.filePath), { recursive: true });
       // 書きかけで終了してもファイルが壊れないよう、別名に書いてから置き換える
       const tmp = `${this.filePath}.tmp`;
@@ -174,4 +282,4 @@ class HistoryStore {
   }
 }
 
-module.exports = { HistoryStore, dateKey, retentionCutoff, RETAIN_DAYS };
+module.exports = { HistoryStore, mergeHistory, dateKey, retentionCutoff, RETAIN_DAYS };

@@ -1,6 +1,7 @@
 'use strict';
 
 const { app, BrowserWindow, ipcMain, screen, Menu, Tray, net, shell, dialog } = require('electron');
+const fs = require('fs');
 const path = require('path');
 const { HistoryStore } = require('./history-store');
 const { loadSettings, saveSettings } = require('./settings');
@@ -92,19 +93,26 @@ let tray = null;
 // アプリ用の保存場所に置く。開発中（npm start）は今まで通りプロジェクトの data/ に置く
 const dataDir = app.isPackaged ? app.getPath('userData') : path.join(__dirname, 'data');
 
-// 会話履歴はメインプロセスだけが持ち、history.json に保存する（終了しても消えない）。
-// テストのときは環境変数 MASCOT_HISTORY_FILE で保存先を差し替えられる。
-const store = new HistoryStore(
-  process.env.MASCOT_HISTORY_FILE
-    ? path.resolve(process.env.MASCOT_HISTORY_FILE)
-    : path.join(dataDir, 'history.json'),
-);
-
 // 設定（自動起動の ON/OFF など）。テストのときは MASCOT_SETTINGS_FILE で差し替えられる
 const settingsFile = process.env.MASCOT_SETTINGS_FILE
   ? path.resolve(process.env.MASCOT_SETTINGS_FILE)
   : path.join(dataDir, 'settings.json');
 let settings = loadSettings(settingsFile);
+
+// 共有フォルダの中に作る、このアプリ用のフォルダの名前
+const SHARE_SUBFOLDER = 'Desktop Mascot';
+// 共有中、ほかの PC で書き足されていないかファイルを見に行く間隔
+const SHARE_WATCH_INTERVAL_MS = 5 * 1000;
+
+/** 会話履歴のファイルの場所。共有中は共有フォルダ、そうでなければこの PC の中 */
+function historyFilePath() {
+  if (process.env.MASCOT_HISTORY_FILE) return path.resolve(process.env.MASCOT_HISTORY_FILE);
+  return path.join(settings.historyFolder || dataDir, 'history.json');
+}
+
+// 会話履歴はメインプロセスだけが持ち、history.json に保存する（終了しても消えない）。
+// テストのときは環境変数 MASCOT_HISTORY_FILE で保存先を差し替えられる。
+const store = new HistoryStore(historyFilePath());
 
 // ウィンドウの基本の高さ。長い返事のときだけ一時的に上へ伸ばす
 const WINDOW_MIN_HEIGHT = 420;
@@ -205,6 +213,17 @@ function buildMenu() {
       },
     },
     { label: '会話をリセット', click: confirmReset },
+    {
+      label: 'ほかの PC と会話を共有',
+      submenu: [
+        {
+          label: settings.historyFolder ? `共有中: ${settings.historyFolder}` : '共有していません',
+          enabled: false,
+        },
+        { label: '共有するフォルダを選ぶ…', click: chooseShareFolder },
+        { label: '共有をやめる', enabled: Boolean(settings.historyFolder), click: stopSharing },
+      ],
+    },
     { type: 'separator' },
     {
       label: '起動時に自動で立ち上げる',
@@ -247,6 +266,101 @@ function applyOpenAtLogin() {
   });
 }
 
+// ---------------------------------------------------------------------------
+// ほかの PC と会話を共有する
+// ---------------------------------------------------------------------------
+// 会話の履歴を Google ドライブなどのフォルダに置き、ほかの PC のマスコットと同じファイルを使う。
+// 同期はドライブのアプリに任せ、こちらは保存のたびに混ぜることと、変化を見に行くことだけをする。
+
+function showDialog(options) {
+  return win ? dialog.showMessageBox(win, options) : dialog.showMessageBox(options);
+}
+
+/** 共有フォルダを最初に開く場所。Google ドライブか OneDrive があればそこから */
+function defaultShareParent() {
+  const candidates = ['G:\\マイドライブ', 'G:\\My Drive', process.env.OneDrive, app.getPath('documents')];
+  return candidates.find((dir) => dir && fs.existsSync(dir));
+}
+
+async function chooseShareFolder() {
+  const options = {
+    title: '会話を共有するフォルダを選ぶ',
+    message: 'Google ドライブなど、ほかの PC と同期しているフォルダを選んでください',
+    buttonLabel: 'このフォルダで共有',
+    defaultPath: defaultShareParent(),
+    properties: ['openDirectory', 'createDirectory'],
+  };
+  const { canceled, filePaths } = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options);
+  if (canceled || !filePaths[0]) return;
+
+  // 選んだフォルダの中に専用のフォルダを作る。専用のフォルダそのものを選んだときはそのまま使う
+  const picked = filePaths[0];
+  const folder = path.basename(picked) === SHARE_SUBFOLDER ? picked : path.join(picked, SHARE_SUBFOLDER);
+
+  try {
+    await switchHistoryFolder(folder);
+  } catch (err) {
+    await showDialog({
+      type: 'error',
+      title: '会話を共有できませんでした',
+      message: 'そのフォルダに会話を保存できませんでした。',
+      detail: `${err.message}\n\nドライブのアプリが動いているか確かめてから、もう一度選んでください。`,
+    });
+    return;
+  }
+  await showDialog({
+    type: 'info',
+    title: '会話の共有を始めました',
+    message: `会話を「${folder}」に保存します。`,
+    detail: 'ほかの PC でも、右クリックメニューの「ほかの PC と会話を共有」から、同じフォルダを選んでください。',
+  });
+}
+
+async function stopSharing() {
+  await switchHistoryFolder('');
+  await showDialog({
+    type: 'info',
+    title: '会話の共有をやめました',
+    message: 'これからの会話は、この PC の中だけに保存します。',
+    detail: 'これまでの会話はこの PC にも残しています。共有フォルダの中身は消していません。',
+  });
+}
+
+/** 履歴の保存先を移し、設定に残す。移した先にあった会話とは混ぜる */
+async function switchHistoryFolder(folder) {
+  const previous = settings.historyFolder;
+  settings = { ...settings, historyFolder: folder };
+  try {
+    await store.moveTo(historyFilePath());
+  } catch (err) {
+    // 保存できなかったら元の場所に戻す
+    settings = { ...settings, historyFolder: previous };
+    await store.moveTo(historyFilePath()).catch(() => {});
+    throw err;
+  }
+  saveSettings(settingsFile, settings);
+  watchSharedHistory();
+  refreshTrayMenu();
+}
+
+let watchedFile = null;
+
+/** 共有中は、ほかの PC が書き足していないかファイルを見に行き、変わっていたら取り込む */
+function watchSharedHistory() {
+  if (watchedFile) fs.unwatchFile(watchedFile);
+  watchedFile = null;
+  if (!settings.historyFolder || process.env.MASCOT_HISTORY_FILE) return;
+
+  watchedFile = store.filePath;
+  // ドライブが後からつながったとき（サインイン直後など）も、ファイルが現れた時点で気づける
+  fs.watchFile(watchedFile, { interval: SHARE_WATCH_INTERVAL_MS }, (current, previous) => {
+    if (current.mtimeMs === previous.mtimeMs) return;
+    store.sync().then((changed) => {
+      if (changed) console.log('[history] ほかの PC の会話を取り込みました');
+    }).catch(() => {});
+  });
+}
+
 ipcMain.on('menu:show', () => {
   if (win) buildMenu().popup({ window: win });
 });
@@ -263,13 +377,14 @@ async function confirmReset() {
     detail: '消した内容は元に戻せません。',
   };
   // 自動起動の待ち時間中はまだウィンドウが無いので、トレイから押されたら単独で出す
-  const { response } = win ? await dialog.showMessageBox(win, options) : await dialog.showMessageBox(options);
+  const { response } = await showDialog(options);
   if (response === 0) await store.clear();
 }
 
 app.whenReady().then(async () => {
   applyOpenAtLogin();
   store.load();
+  watchSharedHistory();
   try {
     createTray();
   } catch (err) {

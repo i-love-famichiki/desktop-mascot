@@ -3,7 +3,7 @@
 // アプリの設定を JSON ファイルに保存する（終了しても覚えておく）。
 // Electron に依存しないので、node だけでテストできる（test/settings.test.js）。
 //
-// ファイルの中身:  { "openAtLogin": true }
+// ファイルの中身:  { "openAtLogin": true, "historyFolder": "" }
 
 const fs = require('fs');
 const path = require('path');
@@ -11,6 +11,8 @@ const path = require('path');
 const DEFAULT_SETTINGS = Object.freeze({
   // Windows にサインインしたとき自動で立ち上げる
   openAtLogin: true,
+  // ほかの PC と会話を共有するフォルダ（Google ドライブの中など）。空なら共有しない
+  historyFolder: '',
 });
 
 /** 設定を読む。ファイルが無い・壊れている・知らない値は初期値で補う */
