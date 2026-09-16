@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const { HistoryStore } = require('./history-store');
 const { loadSettings, saveSettings } = require('./settings');
+const { createSseParser } = require('./sse');
 
 // 自動起動（Windows にサインインしたとき立ち上がる）で起動されたときに付く目印
 const AUTOSTART_ARG = '--autostart';
@@ -27,6 +28,8 @@ if (!app.requestSingleInstanceLock()) {
 // 雑談用なので速くて安いモデルを使う。賢さが欲しくなったら 'gemini-3.8-flash' などに。
 const MODEL = 'gemini-3.5-flash-lite';
 const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
+// 会話の返事は、できた分から少しずつ受け取る（alt=sse で Server-Sent Events の形になる）
+const GEMINI_STREAM_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:streamGenerateContent?alt=sse`;
 
 const GEMINI_TIMEOUT_MS = 30 * 1000;
 
@@ -519,8 +522,13 @@ ipcMain.on('window:click-through', (_event, enabled) => {
 // 返事を待っている間に次の発言が来ても、1つずつ順番に処理する
 let chatQueue = Promise.resolve();
 
-ipcMain.handle('chat:send', (_event, userText) => {
-  const reply = chatQueue.then(() => chat(clip(String(userText), USER_TEXT_MAX_CHARS)));
+ipcMain.handle('chat:send', (event, userText) => {
+  // 届いた分の返事を、その都度レンダラーへ送って吹き出しに流す
+  const sender = event.sender;
+  const onDelta = (delta) => {
+    if (!sender.isDestroyed()) sender.send('chat:delta', delta);
+  };
+  const reply = chatQueue.then(() => chat(clip(String(userText), USER_TEXT_MAX_CHARS), onDelta));
   chatQueue = reply.catch(() => {});
   return reply;
 });
@@ -531,9 +539,9 @@ ipcMain.handle('chat:history', () => ({
   messages: store.messages.map(({ role, content, at }) => ({ role, content, at })),
 }));
 
-async function chat(userText) {
+async function chat(userText, onDelta) {
   try {
-    const { text, sources, searchSuggestions } = await askGemini(buildContents(store.messages, userText));
+    const { text, sources, searchSuggestions } = await askGemini(buildContents(store.messages, userText), { onDelta });
     // 返事を表示するのに保存の完了は待たない（失敗しても store 側でログに出す）
     store.append(
       { role: 'user', content: userText, at: Date.now() },
@@ -610,16 +618,19 @@ class GeminiError extends Error {
  * Gemini API を呼んで、返事の本文と出典を返す。
  * 会話では Google 検索を道具として渡しておき、検索するかどうかはモデルが決める。
  * 要約のときは systemPrompt を差し替え、tools を空にして検索させない。
+ * onDelta を渡すと、返事をできた分から少しずつ受け取り、届くたびに本文の続きを渡す。
  * @returns {Promise<{ text: string, sources: { title: string, uri: string }[] }>}
  */
-async function askGemini(contents, { systemPrompt = buildSystemPrompt(), tools = [{ google_search: {} }] } = {}) {
+async function askGemini(contents, { systemPrompt = buildSystemPrompt(), tools = [{ google_search: {} }], onDelta = null } = {}) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new GeminiError('no-key', 'GEMINI_API_KEY が設定されていません');
 
   let res;
+  let chunks;
   try {
     // Chromium の通信機能を使う（OS の証明書ストアを使うので、セキュリティソフトの割り込みにも強い）
-    res = await net.fetch(GEMINI_ENDPOINT, {
+    // 時間切れは、返事を最後まで受け取り終わるまでを数える
+    res = await net.fetch(onDelta ? GEMINI_STREAM_ENDPOINT : GEMINI_ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
       body: JSON.stringify({
@@ -629,15 +640,21 @@ async function askGemini(contents, { systemPrompt = buildSystemPrompt(), tools =
       }),
       signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
     });
+
+    // 失敗のときは、少しずつ受け取る形でもふつうの JSON が1つ返ってくる
+    if (!res.ok || !onDelta) {
+      chunks = [await res.json().catch(() => null)];
+    } else {
+      chunks = await readStream(res, onDelta);
+    }
   } catch (err) {
     throw err.name === 'TimeoutError'
       ? new GeminiError('timeout', `${GEMINI_TIMEOUT_MS}ms 以内に応答がありませんでした`)
       : new GeminiError('network', err.message);
   }
 
-  const body = await res.json().catch(() => null);
-
   if (!res.ok) {
+    const body = chunks[0];
     const detail = `status=${res.status} ${body?.error?.status ?? ''} ${body?.error?.message ?? ''}`;
     const reason = body?.error?.details?.find((d) => d.reason)?.reason;
     if (reason === 'API_KEY_INVALID' || res.status === 401 || res.status === 403) {
@@ -647,19 +664,18 @@ async function askGemini(contents, { systemPrompt = buildSystemPrompt(), tools =
     throw new GeminiError('failed', detail);
   }
 
-  if (body?.promptFeedback?.blockReason) {
-    throw new GeminiError('blocked', `blockReason=${body.promptFeedback.blockReason}`);
+  // 少しずつ受け取ったときは、本文をつなげ、終わり方と検索の情報は最後に来たものを使う
+  const blockReason = chunks.find((chunk) => chunk?.promptFeedback?.blockReason)?.promptFeedback.blockReason;
+  if (blockReason) {
+    throw new GeminiError('blocked', `blockReason=${blockReason}`);
   }
 
-  const candidate = body?.candidates?.[0];
-  const text = (candidate?.content?.parts ?? [])
-    .filter((part) => typeof part.text === 'string' && !part.thought)
-    .map((part) => part.text)
-    .join('')
-    .trim();
+  const candidates = chunks.map((chunk) => chunk?.candidates?.[0]).filter(Boolean);
+  const text = candidates.map(candidateText).join('').trim();
+  const finishReason = candidates.findLast((candidate) => candidate.finishReason)?.finishReason;
+  const groundingMetadata = candidates.findLast((candidate) => candidate.groundingMetadata)?.groundingMetadata;
 
   if (!text) {
-    const finishReason = candidate?.finishReason;
     throw new GeminiError(
       finishReason === 'SAFETY' || finishReason === 'PROHIBITED_CONTENT' ? 'blocked' : 'failed',
       `返事が空でした finishReason=${finishReason}`,
@@ -668,9 +684,44 @@ async function askGemini(contents, { systemPrompt = buildSystemPrompt(), tools =
 
   return {
     text,
-    sources: extractSources(candidate?.groundingMetadata),
-    searchSuggestions: extractSearchSuggestions(candidate?.groundingMetadata),
+    sources: extractSources(groundingMetadata),
+    searchSuggestions: extractSearchSuggestions(groundingMetadata),
   };
+}
+
+/** 返事の本文（考えている途中の文は除く） */
+function candidateText(candidate) {
+  return (candidate?.content?.parts ?? [])
+    .filter((part) => typeof part.text === 'string' && !part.thought)
+    .map((part) => part.text)
+    .join('');
+}
+
+/** 少しずつ届く返事を最後まで読み、届いた塊（JSON）を順に並べて返す。本文は届くたびに onDelta へ */
+async function readStream(res, onDelta) {
+  const chunks = [];
+  const parser = createSseParser((data) => {
+    let chunk;
+    try {
+      chunk = JSON.parse(data);
+    } catch {
+      return; // 読めない塊は飛ばす
+    }
+    chunks.push(chunk);
+    const delta = candidateText(chunk?.candidates?.[0]);
+    if (delta) onDelta(delta);
+  });
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    parser.push(decoder.decode(value, { stream: true }));
+  }
+  parser.push(decoder.decode());
+  parser.end();
+  return chunks;
 }
 
 /**

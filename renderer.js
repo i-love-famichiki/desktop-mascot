@@ -427,21 +427,58 @@ inputEl.addEventListener('keydown', (event) => {
 // ---------------------------------------------------------------------------
 // マスコットに話しかける（返事はメインプロセスが Gemini からもらってくる）
 // ---------------------------------------------------------------------------
-let streamed = '';
+// 返事は Gemini からあっという間に届くので、そのまま出すと一度に出たように見える。
+// 届いた文字をためておき、1文字ずつ打つように吹き出しへ出す。
+// ためている文字が多いときは1回に出す文字を増やし、遅れすぎないようにする
+const TYPE_INTERVAL_MS = 45;
+const TYPE_CATCHUP_TICKS = 60;
+
+let typed = '';
+let pendingChars = [];
+let typeTimer = null;
+let onTypingDone = null;
 
 window.mascot.onDelta((delta) => {
-  // 最初の1文字が来たら「考え中」表示をやめて本文に切り替える
-  if (streamed === '') {
-    bubbleEl.classList.remove('thinking');
-    bubbleTextEl.textContent = '';
-  }
-  streamed += delta;
-  bubbleTextEl.textContent = streamed;
+  pendingChars.push(...delta);
+  if (!typeTimer) typeTimer = setInterval(typeStep, TYPE_INTERVAL_MS);
 });
+
+function typeStep() {
+  if (pendingChars.length === 0) {
+    stopTyping();
+    return;
+  }
+  // 最初の1文字を出すときに「考え中」表示をやめて本文に切り替える
+  if (typed === '') bubbleEl.classList.remove('thinking');
+  const count = Math.max(1, Math.ceil(pendingChars.length / TYPE_CATCHUP_TICKS));
+  typed += pendingChars.splice(0, count).join('');
+  bubbleTextEl.textContent = typed.trimStart();
+}
+
+function stopTyping() {
+  clearInterval(typeTimer);
+  typeTimer = null;
+  onTypingDone?.();
+  onTypingDone = null;
+}
+
+/** ためている文字を出し終わるまで待つ */
+function waitTyping() {
+  if (!typeTimer) return Promise.resolve();
+  return new Promise((resolve) => {
+    onTypingDone = resolve;
+  });
+}
+
+function resetTyping() {
+  pendingChars = [];
+  stopTyping();
+  typed = '';
+}
 
 async function ask(text) {
   busy = true;
-  streamed = '';
+  resetTyping();
   clearTimeout(hideTimer);
   bubbleTextEl.textContent = '';
   showSources([]);
@@ -452,12 +489,15 @@ async function ask(text) {
 
   try {
     const result = await window.mascot.send(text);
-    // 失敗時はエラー文が入る。読み返せるよう、次に話しかけるか×を押すまで残す。
+    // うまくいったときは、打ち終わってから全文をリンクつきで出し直す。
+    // 失敗時はエラー文が入る（途中まで出ていた文は置き換える）。
+    // 読み返せるよう、次に話しかけるか×を押すまで残す。
     // Google 検索を使った返事なら出典も添える
+    if (result.ok) await waitTyping();
+    resetTyping();
     say(result.text, { keep: true, sources: result.sources ?? [], searchSuggestions: result.searchSuggestions });
   } finally {
     busy = false;
-    streamed = '';
     mascotEl.classList.remove('talking');
     bubbleEl.classList.remove('thinking');
   }
