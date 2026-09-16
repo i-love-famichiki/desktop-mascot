@@ -1,6 +1,6 @@
 {
   "name": "desktop-mascot",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "デスクトップに住む枝豆のマスコット",
   "main": "main.js",
   "scripts": {
@@ -35,7 +35,8 @@
       "style.css",
       "history-store.js",
       "settings.js",
-      "assets/**"
+      "assets/**",
+      "build/icon.png"
     ],
     "win": {
       "target": "nsis",

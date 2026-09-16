@@ -233,6 +233,7 @@ function buildMenu() {
       click: (item) => setOpenAtLogin(item.checked),
     },
     { type: 'separator' },
+    { label: 'このアプリについて', click: showAbout },
     { label: '終了', click: () => app.quit() },
   ]);
 }
@@ -358,6 +359,26 @@ function watchSharedHistory() {
     store.sync().then((changed) => {
       if (changed) console.log('[history] ほかの PC の会話を取り込みました');
     }).catch(() => {});
+  });
+}
+
+// ---------------------------------------------------------------------------
+// このアプリについて（バージョン情報）
+// ---------------------------------------------------------------------------
+async function showAbout() {
+  await showDialog({
+    type: 'none',
+    icon: path.join(__dirname, 'build', 'icon.png'),
+    title: 'このアプリについて',
+    message: `Desktop Mascot  バージョン ${app.getVersion()}`,
+    detail: [
+      'デスクトップに住む枝豆のマスコット',
+      '',
+      `AI のモデル: ${MODEL}`,
+      `会話の保存先: ${store.filePath}`,
+      `Electron ${process.versions.electron} / Chromium ${process.versions.chrome}`,
+    ].join('\n'),
+    buttons: ['閉じる'],
   });
 }
 
