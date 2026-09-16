@@ -36,7 +36,7 @@ const bubbleSourcesEl = document.getElementById('bubble-sources');
 
 function say(text, { keep = false, sources = [] } = {}) {
   clearTimeout(hideTimer);
-  bubbleTextEl.textContent = text;
+  bubbleTextEl.replaceChildren(...linkify(text));
   bubbleTextEl.scrollTop = 0;
   showSources(sources);
   bubbleEl.classList.remove('hidden', 'minimized', 'history');
@@ -61,16 +61,47 @@ function showSources(sources) {
   bubbleSourcesEl.append('出典: ');
   sources.forEach((source, index) => {
     if (index > 0) bubbleSourcesEl.append('、');
-    const link = document.createElement('a');
-    link.href = '#';
-    link.textContent = source.title;
-    link.title = 'ブラウザで開く';
-    link.addEventListener('click', (event) => {
-      event.preventDefault();
-      window.mascot.openLink(source.uri);
-    });
-    bubbleSourcesEl.append(link);
+    bubbleSourcesEl.append(createLink(source.title, source.uri));
   });
+}
+
+// 押すと既定のブラウザで開くリンク（吹き出しの中では画面を移動させない）
+function createLink(label, url) {
+  const link = document.createElement('a');
+  link.href = '#';
+  link.textContent = label;
+  link.title = `ブラウザで開く: ${url}`;
+  link.addEventListener('click', (event) => {
+    event.preventDefault();
+    window.mascot.openLink(url);
+  });
+  return link;
+}
+
+// 返事の中の URL と、Markdown 形式のリンク [名前](URL) を押せるリンクにする。
+// 文は日本語で続くことが多いので、URL は全角の文字や空白の手前で区切る
+const LINK_PATTERN = /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)|https?:\/\/[^\s<>"'`　-ヿ一-鿿＀-￯]+/g;
+// URL の直後に付きやすい句読点やかっこは、URL に含めない
+const URL_TRAILING = /[.,;:!?'")\]]+$/;
+
+function linkify(text) {
+  const nodes = [];
+  let last = 0;
+  for (const match of text.matchAll(LINK_PATTERN)) {
+    let [whole, label, url] = match;
+    if (!url) {
+      url = whole.replace(URL_TRAILING, '');
+      // 閉じかっこは、URL の中に開きかっこがあるときだけ残す（Wikipedia の URL など）
+      const rest = whole.slice(url.length);
+      if (rest.startsWith(')') && url.includes('(')) url += ')';
+      whole = url;
+    }
+    if (match.index > last) nodes.push(text.slice(last, match.index));
+    nodes.push(createLink(label ?? url, url));
+    last = match.index + whole.length;
+  }
+  if (last < text.length) nodes.push(text.slice(last));
+  return nodes;
 }
 
 // ---------------------------------------------------------------------------
@@ -129,7 +160,7 @@ function buildHistoryItem(kind, label, text) {
 
   const body = document.createElement('span');
   body.className = 'history-body';
-  body.textContent = text;
+  body.replaceChildren(...linkify(text));
 
   item.append(who, body);
   return item;

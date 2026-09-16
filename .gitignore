@@ -4,3 +4,6 @@ dist/
 *.log
 # 会話の履歴（個人的な内容なので記録しない）
 data/
+# 持ち出し用（インストーラーが大きいので記録しない）
+DesktopMascot_持ち出し用/
+DesktopMascot_持ち出し用.zip

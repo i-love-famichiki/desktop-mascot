@@ -90,7 +90,8 @@ body {
   word-break: break-word;
 }
 
-#bubble-sources a {
+#bubble-sources a,
+#bubble-text a {
   color: #3f7fb0;
   text-decoration: underline;
   cursor: pointer;
