@@ -522,6 +522,43 @@ function showReminders() {
   say(pendingReminders.join('\n\n'), { keep: true });
   pendingReminders = [];
   startBounce();
+  playChime();
+}
+
+// 「ポロン♪」を2回。音のファイルは使わず、その場で音を作る（高い音 → さらに高い音）
+const CHIME_NOTES = [1047, 1568]; // ド、ソ（Hz）
+const CHIME_NOTE_GAP_S = 0.12;
+const CHIME_REPEAT_GAP_S = 0.6;
+const CHIME_VOLUME = 0.25;
+let audioContext = null;
+
+function playChime() {
+  try {
+    audioContext ??= new AudioContext();
+    const start = audioContext.currentTime + 0.05;
+    for (let repeat = 0; repeat < 2; repeat++) {
+      CHIME_NOTES.forEach((frequency, index) => {
+        playNote(frequency, start + repeat * CHIME_REPEAT_GAP_S + index * CHIME_NOTE_GAP_S);
+      });
+    }
+  } catch (err) {
+    // 音が出せなくても、吹き出しとはねるのは続ける
+    console.warn('[reminder] 音を鳴らせませんでした:', err.message);
+  }
+}
+
+function playNote(frequency, at) {
+  const oscillator = audioContext.createOscillator();
+  const gain = audioContext.createGain();
+  oscillator.type = 'sine';
+  oscillator.frequency.value = frequency;
+  // すっと鳴って、鈴のように消えていく
+  gain.gain.setValueAtTime(0, at);
+  gain.gain.linearRampToValueAtTime(CHIME_VOLUME, at + 0.01);
+  gain.gain.exponentialRampToValueAtTime(0.001, at + 0.5);
+  oscillator.connect(gain).connect(audioContext.destination);
+  oscillator.start(at);
+  oscillator.stop(at + 0.5);
 }
 
 function startBounce() {
