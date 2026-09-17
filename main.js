@@ -4,6 +4,7 @@ const { app, BrowserWindow, ipcMain, screen, Menu, Tray, net, shell, dialog } = 
 const fs = require('fs');
 const path = require('path');
 const { HistoryStore } = require('./history-store');
+const { searchConversations, mergeMessages, parseDay } = require('./archive-store');
 const { ReminderStore } = require('./reminder-store');
 const { loadSettings, saveSettings } = require('./settings');
 const { createSseParser } = require('./sse');
@@ -76,6 +77,11 @@ function buildSystemPrompt() {
     '口調は親しみやすく、少しだけ子どもっぽく、絵文字は使いません。',
     '返事は必ず日本語で、基本は2〜3文の短さに収めてください。画面の小さな吹き出しに表示されます。',
     ...reminderPromptLines(),
+    '',
+    '以前の会話について聞かれ、下の会話や要約だけでは詳しく分からないときは、search_history で保管庫を探してから答えてください。',
+    '言い換えも考えて、言葉はいくつか渡してください（例: 転職、仕事を変える、退職）。',
+    '「一年前」「去年の夏」などは、現在の日時をもとに期間（from / to）に直してください。',
+    '見つからなかったときは、覚えていないと正直に答えてください。見つからない話を作ってはいけません。',
     ...pastDaysPromptLines(),
     ...memoryPromptLines(),
   ].join('\n');
@@ -462,11 +468,21 @@ async function confirmReset() {
     cancelId: 1,
     title: '会話をリセット',
     message: '会話の履歴と、古い会話の要約をすべて消します。',
-    detail: '消した内容は元に戻せません。',
+    detail: 'マスコットは今までの話を覚えていない状態に戻ります。話した中身は保管庫に残るので、「前にこんな話したっけ？」と聞けば探せます。',
   };
   // 自動起動の待ち時間中はまだウィンドウが無いので、トレイから押されたら単独で出す
   const { response } = await showDialog(options);
-  if (response === 0) await store.clear();
+  if (response !== 0) return;
+  try {
+    await store.clear();
+  } catch (err) {
+    await showDialog({
+      type: 'error',
+      title: '会話をリセットできませんでした',
+      message: '会話を保管庫に残せなかったので、リセットしませんでした。',
+      detail: `${err.message}\n\n共有中なら、ドライブのアプリが動いているか確かめてから、もう一度試してください。`,
+    });
+  }
 }
 
 app.whenReady().then(async () => {
@@ -556,8 +572,27 @@ ipcMain.on('window:click-through', (_event, enabled) => {
 // 知らせる文は登録のときに Gemini が決めておくので、知らせるときは Gemini を呼ばない
 const REMINDER_CHECK_INTERVAL_MS = 1000;
 
-const REMINDER_FUNCTIONS = {
+// 会話で Gemini に渡す道具（タイマーとリマインダー、昔の会話探し）
+const CHAT_FUNCTIONS = {
   declarations: [
+    {
+      name: 'search_history',
+      description:
+        'ユーザーと以前に話した会話を、保管庫から言葉で探す。「前にこんな話したっけ？」「一年前にこんな相談しなかった？」など、昔の会話の詳しい中身が必要なとき',
+      parameters: {
+        type: 'object',
+        properties: {
+          keywords: {
+            type: 'array',
+            items: { type: 'string' },
+            description: '探す言葉（1〜5個）。どれか1つでも含む発言が見つかる。言い換えも入れる（例: ["転職", "仕事を変える", "退職"]）',
+          },
+          from: { type: 'string', description: '探す期間のはじめ。YYYY-MM-DD か YYYY-MM（省略すると、いちばん古い会話から）' },
+          to: { type: 'string', description: '探す期間の終わり。YYYY-MM-DD か YYYY-MM（省略すると、今まで）' },
+        },
+        required: ['keywords'],
+      },
+    },
     {
       name: 'set_timer',
       description: '今から指定した秒数がたったら、ユーザーに知らせるタイマーを登録する。「3分たったら教えて」「1時間後に声かけて」など',
@@ -598,8 +633,34 @@ const REMINDER_FUNCTIONS = {
       },
     },
   ],
-  call: callReminderFunction,
+  call: (functionCall) => (functionCall.name === 'search_history' ? searchHistory(functionCall.args) : callReminderFunction(functionCall)),
 };
+
+/** 保管庫と直近の履歴から、昔の会話を探す。見つかった発言だけを Gemini に返す */
+async function searchHistory({ keywords, from, to } = {}) {
+  const range = { from: parseDay(from) ?? -Infinity, to: parseDay(to, true) ?? Infinity };
+  let archived;
+  try {
+    archived = await store.archive.readRange(range);
+  } catch (err) {
+    return { ok: false, error: `保管庫を読めませんでした: ${err.message}` };
+  }
+  const words = (Array.isArray(keywords) ? keywords : [keywords]).slice(0, 5);
+  const result = searchConversations(
+    { messages: mergeMessages(archived, store.messages), summaries: store.summaries },
+    { keywords: words, ...range },
+  );
+  // 1年以上前の話もあるので、年も付ける
+  const time = (at) => `${new Date(at).getFullYear()}年${formatMessageTime(at)}`;
+  return {
+    ok: true,
+    found: result.total,
+    conversations: result.hits.map((hit) =>
+      hit.map((message) => `[${time(message.at)}] ${message.role === 'user' ? 'ユーザー' : 'あなた'}: ${message.content}`),
+    ),
+    summaries: result.summaries.map(({ date, summary }) => `${date}: ${summary}`),
+  };
+}
 
 /** Gemini が呼んだ道具を実行し、結果を Gemini に返す形にする */
 function callReminderFunction({ name, args = {} }) {
@@ -695,7 +756,7 @@ async function chat(userText, onDelta) {
   try {
     const { text, sources, searchSuggestions } = await askGemini(buildContents(store.messages, userText), {
       onDelta,
-      functions: REMINDER_FUNCTIONS,
+      functions: CHAT_FUNCTIONS,
     });
     // 返事を表示するのに保存の完了は待たない（失敗しても store 側でログに出す）
     store.append(
@@ -769,8 +830,9 @@ class GeminiError extends Error {
   }
 }
 
-// タイマーやリマインダーの登録で、道具を使う → 結果を返す、を繰り返す回数の上限
-const MAX_TOOL_ROUNDS = 3;
+// タイマーの登録や昔の会話探しで、道具を使う → 結果を返す、を繰り返す回数の上限
+// （探して見つからず、言葉を変えてもう一度探すこともあるので少し余裕を持たせる）
+const MAX_TOOL_ROUNDS = 4;
 
 /**
  * Gemini API を呼んで、返事の本文と出典を返す。
@@ -823,9 +885,11 @@ async function askGemini(
       { role: 'model', parts },
       {
         role: 'user',
-        parts: calls.map((call) => ({
-          functionResponse: { name: call.name, ...(call.id && { id: call.id }), response: functions.call(call) },
-        })),
+        parts: await Promise.all(
+          calls.map(async (call) => ({
+            functionResponse: { name: call.name, ...(call.id && { id: call.id }), response: await functions.call(call) },
+          })),
+        ),
       },
     ];
   }

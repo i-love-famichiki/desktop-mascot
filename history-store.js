@@ -13,9 +13,13 @@
 //
 // ほかの PC と同じファイルを使って会話を共有できる（Google ドライブなどのフォルダに置く）。
 // 保存のたびにファイルの中身と混ぜてから書くので、ほかの PC で足された発言を消さない。
+//
+// 要約に置き換えた日の会話や、リセットで消した会話は、消す前に同じフォルダの archive/ に
+// 残す（archive-store.js）。保管庫に書けなかったときは、履歴から消さない。
 
 const fs = require('fs');
 const path = require('path');
+const { ArchiveStore, dateKey } = require('./archive-store');
 
 // 今日を含めた直近7日分（例: 今日が 9/15 なら 9/9〜9/15）は詳しいまま残す
 const RETAIN_DAYS = 7;
@@ -26,13 +30,6 @@ const PROMPT_SUMMARIES_MAX_CHARS = 2000;
 // 1回の発言が長すぎると枠を使い切ってしまうので、1発言ごとにも短く切る
 const PAST_DAYS_MAX_CHARS = 4000;
 const PAST_MESSAGE_MAX_CHARS = 300;
-
-/** ローカル時刻での日付（YYYY-MM-DD） */
-function dateKey(at) {
-  const d = new Date(at);
-  const pad = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
 
 /** これより前（の日）の会話を要約に回す、という境目の時刻 */
 function retentionCutoff(now) {
@@ -96,10 +93,14 @@ function mergeHistory(local, remote) {
   return { messages, summaries, clearedAt };
 }
 
+/** 履歴ファイルと同じフォルダにある保管庫 */
+const archiveDirFor = (filePath) => path.join(path.dirname(filePath), 'archive');
+
 class HistoryStore {
   /** @param {string} filePath 保存先の JSON ファイル */
   constructor(filePath) {
     this.filePath = filePath;
+    this.archive = new ArchiveStore(archiveDirFor(filePath));
     /** @type {{ role: 'user' | 'assistant', content: string, at: number }[]} */
     this.messages = [];
     /** @type {{ date: string, summary: string, createdAt: number }[]} */
@@ -166,6 +167,8 @@ class HistoryStore {
     await this.saving.catch(() => {});
     this.filePath = filePath;
     this.saveDisabled = false;
+    // 保管庫も一緒に移す（元の場所の保管庫は消さずに残す）
+    await this.archive.moveTo(archiveDirFor(filePath));
     await this.save();
   }
 
@@ -182,7 +185,15 @@ class HistoryStore {
   }
 
   applyMerge(remote) {
-    Object.assign(this, mergeHistory(this, remote));
+    const merged = mergeHistory(this, remote);
+    // ほかの PC でリセット・要約されて、ここで初めて消える発言も保管庫に残す
+    // （要約した PC が保管庫に入れていれば、同じ発言は1つにまとまる）
+    const kept = new Set(merged.messages);
+    const dropped = this.messages.filter((message) => !kept.has(message));
+    if (dropped.length > 0) {
+      this.archive.add(dropped).catch((err) => console.error('[history] 消える発言を保管庫に残せませんでした:', err.message));
+    }
+    Object.assign(this, merged);
   }
 
   /** 発言を足して保存する */
@@ -191,8 +202,12 @@ class HistoryStore {
     return this.save();
   }
 
-  /** 履歴も要約もすべて消して保存する */
-  clear() {
+  /**
+   * 履歴も要約もすべて消して保存する。話した中身は保管庫に残す（探せば見つかる）。
+   * 保管庫に書けなかったときは、何も消さずに例外にする
+   */
+  async clear() {
+    await this.archive.add(this.messages);
     this.messages = [];
     this.summaries = [];
     this.clearedAt = Date.now();
@@ -258,6 +273,14 @@ class HistoryStore {
         if (!summary) throw new Error('要約が空でした');
       } catch (err) {
         console.error(`[history] ${date} の要約に失敗しました（詳しい履歴は残します）:`, err.message);
+        return { summarizedDays, failedDay: date };
+      }
+
+      // 詳しい中身は保管庫に残す。残せなかった日は、消さずに次回の起動でやり直す
+      try {
+        await this.archive.add(dayMessages);
+      } catch (err) {
+        console.error(`[history] ${date} の会話を保管庫に残せませんでした（詳しい履歴は残します）:`, err.message);
         return { summarizedDays, failedDay: date };
       }
 
