@@ -1,13 +1,13 @@
 {
   "name": "desktop-mascot",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "デスクトップに住む枝豆のマスコット",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "test": "node --test test/*.test.js",
     "mock-history": "node test/make-mock-history.js",
-    "icon": "node build/make-icon.js",
+    "icon": "electron build/make-icon.js",
     "dist": "electron-builder --win"
   },
   "keywords": [],
@@ -15,14 +15,21 @@
   "license": "ISC",
   "type": "commonjs",
   "devDependencies": {
-    "electron": "^44.3.0",
-    "electron-builder": "^26.15.3",
-    "sharp": "^0.35.4"
+    "electron": "44.3.0",
+    "electron-builder": "26.15.3"
   },
   "build": {
     "appId": "com.i-love-famichiki.desktop-mascot",
     "productName": "Desktop Mascot",
     "electronDist": "node_modules/electron/dist",
+    "electronFuses": {
+      "runAsNode": false,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "enableNodeCliInspectArguments": false,
+      "enableEmbeddedAsarIntegrityValidation": true,
+      "onlyLoadAppFromAsar": true,
+      "enableCookieEncryption": true
+    },
     "directories": {
       "output": "dist",
       "buildResources": "build"

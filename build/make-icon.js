@@ -1,12 +1,13 @@
 'use strict';
 
 // exe とインストーラーのアイコン（build/icon.png、256px）を、index.html の豆の絵から作る。
-// 使い方: npm run icon
+// 使い方: npm run icon（Electron で動かす。画像変換のためのパッケージは入れない）
 // 画面の豆は CSS で色を付けているので、ここでは色を SVG に直接書いている。
 // 豆の形を変えたら、ここの path も合わせて変えること。
 
+const fs = require('fs');
 const path = require('path');
-const sharp = require('sharp');
+const { app, BrowserWindow } = require('electron');
 
 const SIZE = 256;
 
@@ -30,11 +31,38 @@ const svg = `
 </svg>`;
 
 const out = path.join(__dirname, 'icon.png');
-sharp(Buffer.from(svg))
-  .png()
-  .toFile(out)
-  .then(() => console.log('アイコンを作りました:', out))
+
+// 見えないウィンドウに SVG を描き、その画面をそのまま PNG にする
+async function main() {
+  const win = new BrowserWindow({
+    width: SIZE,
+    height: SIZE,
+    show: false,
+    transparent: true,
+    frame: false,
+    useContentSize: true,
+    webPreferences: { offscreen: true, zoomFactor: 1 },
+  });
+  const html = `<!doctype html><style>html,body{margin:0;background:transparent;overflow:hidden}svg{display:block}</style>${svg}`;
+  // 描き終わった画面は paint で届く。読み込み後に届いた最初の1枚を使う
+  const painted = new Promise((resolve) => {
+    win.webContents.on('paint', (_event, _dirty, image) => {
+      if (loaded && !image.isEmpty()) resolve(image);
+    });
+  });
+  let loaded = false;
+  await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+  loaded = true;
+  win.webContents.invalidate();
+  const image = await painted;
+  fs.writeFileSync(out, image.resize({ width: SIZE, height: SIZE }).toPNG());
+  console.log('アイコンを作りました:', out);
+}
+
+app.whenReady()
+  .then(main)
   .catch((err) => {
     console.error('アイコンを作れませんでした:', err.message);
     process.exitCode = 1;
-  });
+  })
+  .finally(() => app.quit());
