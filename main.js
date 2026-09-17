@@ -4,6 +4,7 @@ const { app, BrowserWindow, ipcMain, screen, Menu, Tray, net, shell, dialog } = 
 const fs = require('fs');
 const path = require('path');
 const { HistoryStore } = require('./history-store');
+const { ReminderStore } = require('./reminder-store');
 const { loadSettings, saveSettings } = require('./settings');
 const { createSseParser } = require('./sse');
 
@@ -67,13 +68,14 @@ function buildSystemPrompt() {
     '「ぼくはマスコットだから」「食べたことがないから」などを理由に、知っていることを分からないと言ってはいけません。',
     '天気、ニュース、最近の出来事など新しい情報が必要なときは、Google 検索で調べてから答えてください。',
     '場所によって答えが変わる質問（天気など）で場所が分からないときは、短く聞き返してください。',
-    `現在の日時は ${now} です。`,
+    `現在の日時は ${now}（ISO 8601 では ${localIsoString(Date.now())}）です。`,
     ...elapsedPromptLines(),
     'ユーザーの発言の先頭にある [9月16日 21:33] のような表記は、その発言をした日時です。',
     '「さっき」「朝に話した」などの時間の感覚に使ってください。返事には、この日時の表記を付けないでください。',
     '名前はまだありません。ユーザーが名前をくれたら喜んで受け取ってください。',
     '口調は親しみやすく、少しだけ子どもっぽく、絵文字は使いません。',
     '返事は必ず日本語で、基本は2〜3文の短さに収めてください。画面の小さな吹き出しに表示されます。',
+    ...reminderPromptLines(),
     ...pastDaysPromptLines(),
     ...memoryPromptLines(),
   ].join('\n');
@@ -159,6 +161,14 @@ function historyFilePath() {
 // テストのときは環境変数 MASCOT_HISTORY_FILE で保存先を差し替えられる。
 const store = new HistoryStore(historyFilePath());
 
+// リマインダーの保存先。ほかの PC と一緒に知らせないよう、共有中でもこの PC の中に置く。
+// テストのときは MASCOT_REMINDER_FILE で差し替えられる
+const reminders = new ReminderStore(
+  process.env.MASCOT_REMINDER_FILE
+    ? path.resolve(process.env.MASCOT_REMINDER_FILE)
+    : path.join(dataDir, 'reminders.json'),
+);
+
 // ウィンドウの基本の高さ。長い返事のときだけ一時的に上へ伸ばす
 const WINDOW_MIN_HEIGHT = 420;
 
@@ -191,6 +201,8 @@ function createWindow() {
   // マスコットや吹き出しの上に来たらレンダラーが受け付けに切り替える
   win.setIgnoreMouseEvents(true, { forward: true });
   win.loadFile('index.html');
+  // 起動する前や待ち時間中に時間が来ていたリマインダーは、読み込みが終わってから知らせる
+  win.webContents.on('did-finish-load', deliverReminders);
 
   // 検索候補の枠の中のリンクは新しいウィンドウとして開かれる。アプリの中では開かず、
   // Google 検索のページだけを外部ブラウザに渡す
@@ -459,6 +471,8 @@ app.whenReady().then(async () => {
   applyOpenAtLogin();
   store.load();
   watchSharedHistory();
+  reminders.load();
+  setInterval(checkReminders, REMINDER_CHECK_INTERVAL_MS);
   try {
     createTray();
   } catch (err) {
@@ -533,6 +547,126 @@ ipcMain.on('window:click-through', (_event, enabled) => {
 });
 
 // ---------------------------------------------------------------------------
+// タイマーとリマインダー
+// ---------------------------------------------------------------------------
+// 「3分たったら教えて」「明日9時に歯医者って教えて」と話しかけると、Gemini が道具
+// （set_timer / add_reminder）を呼んで登録する。時間が来たら、吹き出しで知らせて豆がはねる。
+// 知らせる文は登録のときに Gemini が決めておくので、知らせるときは Gemini を呼ばない
+const REMINDER_CHECK_INTERVAL_MS = 1000;
+
+const REMINDER_FUNCTIONS = {
+  declarations: [
+    {
+      name: 'set_timer',
+      description: '今から指定した秒数がたったら、ユーザーに知らせるタイマーを登録する。「3分たったら教えて」「1時間後に声かけて」など',
+      parameters: {
+        type: 'object',
+        properties: {
+          seconds: { type: 'integer', description: '今から何秒後に知らせるか（1〜86400）' },
+          message: {
+            type: 'string',
+            description: '時間になったとき吹き出しに出す、あなたの口調の短い一言（例: 3分たったよ。カップラーメンができたよ）',
+          },
+        },
+        required: ['seconds', 'message'],
+      },
+    },
+    {
+      name: 'add_reminder',
+      description: '指定した日時にユーザーへ知らせるリマインダーを登録する。「明日の9時に歯医者って教えて」など',
+      parameters: {
+        type: 'object',
+        properties: {
+          at: { type: 'string', description: '知らせる日時。タイムゾーン付きの ISO 8601（例: 2026-09-18T09:00:00+09:00）' },
+          message: {
+            type: 'string',
+            description: '時間になったとき吹き出しに出す、あなたの口調の短い一言（例: 歯医者の時間だよ）',
+          },
+        },
+        required: ['at', 'message'],
+      },
+    },
+    {
+      name: 'cancel_reminder',
+      description: '登録してあるタイマーやリマインダーを、番号を指定して取り消す',
+      parameters: {
+        type: 'object',
+        properties: { id: { type: 'integer', description: '取り消すものの番号' } },
+        required: ['id'],
+      },
+    },
+  ],
+  call: callReminderFunction,
+};
+
+/** Gemini が呼んだ道具を実行し、結果を Gemini に返す形にする */
+function callReminderFunction({ name, args = {} }) {
+  const describe = (item) => ({ id: item.id, at: localIsoString(item.at), message: item.message });
+  try {
+    switch (name) {
+      case 'set_timer':
+        return { ok: true, registered: describe(reminders.addTimer(Number(args.seconds), args.message)) };
+      case 'add_reminder':
+        return { ok: true, registered: describe(reminders.addReminder(args.at, args.message)) };
+      case 'cancel_reminder': {
+        const item = reminders.cancel(args.id);
+        return item ? { ok: true, canceled: describe(item) } : { ok: false, error: `番号 ${args.id} は登録されていません` };
+      }
+      default:
+        return { ok: false, error: `${name} という道具はありません` };
+    }
+  } catch (err) {
+    // 値がおかしいときは、理由を Gemini に返してユーザーに説明してもらう
+    if (err instanceof RangeError) return { ok: false, error: err.message };
+    throw err;
+  }
+}
+
+/** 今登録されているものの一覧と使い方。毎回システムプロンプトに入れる */
+function reminderPromptLines() {
+  const list = reminders.items.map(
+    (item) => `- 番号${item.id}: ${formatMessageTime(item.at)}（${item.kind === 'timer' ? 'タイマー' : 'リマインダー'}）${item.message}`,
+  );
+  return [
+    '',
+    'タイマーやリマインダーを頼まれたら、道具で登録してから、いつ知らせるかを短く伝えてください。',
+    '「3分たったら」「1時間後に」のように今からの時間なら set_timer、「明日の9時に」のように日時なら add_reminder を使ってください。',
+    '取り消しを頼まれたら cancel_reminder を使ってください。道具を使わずに、登録した・取り消したと言ってはいけません。',
+    '時間になったら、登録した一言がそのまま吹き出しに出ます。',
+    ...(list.length > 0 ? ['今登録されているタイマーとリマインダー:', ...list] : ['今登録されているタイマーとリマインダーはありません。']),
+  ];
+}
+
+/** 「2026-09-17T20:13:00+09:00」のような、この PC の時刻とタイムゾーンでの ISO 8601 */
+function localIsoString(at) {
+  const d = new Date(at);
+  const pad = (n) => String(n).padStart(2, '0');
+  const offset = -d.getTimezoneOffset();
+  const zone = `${offset >= 0 ? '+' : '-'}${pad(Math.floor(Math.abs(offset) / 60))}:${pad(Math.abs(offset) % 60)}`;
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}${zone}`;
+}
+
+// 知らせる文。自動起動の待ち時間中などで窓がまだ無いときは、出せるようになるまでためておく
+let dueNotices = [];
+
+function checkReminders() {
+  for (const item of reminders.takeDue()) {
+    const message = item.message || '時間だよ。';
+    // PC を切っていた・スリープしていたなどで遅れたときは、いつの分かを添える
+    dueNotices.push(item.late ? `（${formatMessageTime(item.at)} の分。時間が過ぎちゃってた）\n${message}` : message);
+  }
+  deliverReminders();
+}
+
+function deliverReminders() {
+  if (dueNotices.length === 0 || !win || win.webContents.isLoading()) return;
+  // 隠しているときも気づけるよう、表に出してから知らせる
+  if (!win.isVisible()) showMascot();
+  win.webContents.send('reminder:due', dueNotices.join('\n\n'));
+  dueNotices = [];
+}
+
+// ---------------------------------------------------------------------------
 // Gemini との会話
 // ---------------------------------------------------------------------------
 // 返事を待っている間に次の発言が来ても、1つずつ順番に処理する
@@ -557,7 +691,10 @@ ipcMain.handle('chat:history', () => ({
 
 async function chat(userText, onDelta) {
   try {
-    const { text, sources, searchSuggestions } = await askGemini(buildContents(store.messages, userText), { onDelta });
+    const { text, sources, searchSuggestions } = await askGemini(buildContents(store.messages, userText), {
+      onDelta,
+      functions: REMINDER_FUNCTIONS,
+    });
     // 返事を表示するのに保存の完了は待たない（失敗しても store 側でログに出す）
     store.append(
       { role: 'user', content: userText, at: Date.now() },
@@ -630,17 +767,87 @@ class GeminiError extends Error {
   }
 }
 
+// タイマーやリマインダーの登録で、道具を使う → 結果を返す、を繰り返す回数の上限
+const MAX_TOOL_ROUNDS = 3;
+
 /**
  * Gemini API を呼んで、返事の本文と出典を返す。
  * 会話では Google 検索を道具として渡しておき、検索するかどうかはモデルが決める。
  * 要約のときは systemPrompt を差し替え、tools を空にして検索させない。
  * onDelta を渡すと、返事をできた分から少しずつ受け取り、届くたびに本文の続きを渡す。
+ * functions を渡すと、モデルがそれを呼んだときに実行して結果を返し、続きの返事をもらう。
+ * @param {{ declarations: object[], call: (functionCall: { name: string, args?: object }) => object } | null} [options.functions]
  * @returns {Promise<{ text: string, sources: { title: string, uri: string }[] }>}
  */
-async function askGemini(contents, { systemPrompt = buildSystemPrompt(), tools = [{ google_search: {} }], onDelta = null } = {}) {
+async function askGemini(
+  contents,
+  { systemPrompt = buildSystemPrompt(), tools = [{ google_search: {} }], onDelta = null, functions = null } = {},
+) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new GeminiError('no-key', 'GEMINI_API_KEY が設定されていません');
 
+  const allTools = functions ? [...tools, { functionDeclarations: functions.declarations }] : tools;
+  const texts = [];
+  let finishReason;
+  let groundingMetadata;
+
+  for (let round = 1; ; round++) {
+    const chunks = await requestGemini(apiKey, {
+      systemInstruction: { parts: [{ text: systemPrompt }] },
+      contents,
+      ...(allTools.length > 0 && { tools: allTools }),
+      // Google 検索と自作の道具を一緒に渡すときは、この指定が要る
+      ...(functions && tools.length > 0 && { toolConfig: { includeServerSideToolInvocations: true } }),
+    }, onDelta);
+
+    // 少しずつ受け取ったときは、本文をつなげ、終わり方と検索の情報は最後に来たものを使う
+    const blockReason = chunks.find((chunk) => chunk?.promptFeedback?.blockReason)?.promptFeedback.blockReason;
+    if (blockReason) {
+      throw new GeminiError('blocked', `blockReason=${blockReason}`);
+    }
+
+    const candidates = chunks.map((chunk) => chunk?.candidates?.[0]).filter(Boolean);
+    texts.push(candidates.map(candidateText).join(''));
+    finishReason = candidates.findLast((candidate) => candidate.finishReason)?.finishReason ?? finishReason;
+    groundingMetadata = candidates.findLast((candidate) => candidate.groundingMetadata)?.groundingMetadata ?? groundingMetadata;
+
+    const parts = candidates.flatMap((candidate) => candidate.content?.parts ?? []);
+    const calls = parts.filter((part) => part.functionCall).map((part) => part.functionCall);
+    if (!functions || calls.length === 0 || round >= MAX_TOOL_ROUNDS) break;
+
+    // モデルの発言（thoughtSignature も含めてそのまま）と道具の結果を足して、続きをもらう
+    contents = [
+      ...contents,
+      { role: 'model', parts },
+      {
+        role: 'user',
+        parts: calls.map((call) => ({
+          functionResponse: { name: call.name, ...(call.id && { id: call.id }), response: functions.call(call) },
+        })),
+      },
+    ];
+  }
+
+  const text = texts.join('').trim();
+  if (!text) {
+    throw new GeminiError(
+      finishReason === 'SAFETY' || finishReason === 'PROHIBITED_CONTENT' ? 'blocked' : 'failed',
+      `返事が空でした finishReason=${finishReason}`,
+    );
+  }
+
+  return {
+    text,
+    sources: extractSources(groundingMetadata),
+    searchSuggestions: extractSearchSuggestions(groundingMetadata),
+  };
+}
+
+/**
+ * Gemini API に1回リクエストして、届いた塊（JSON）を順に並べて返す。
+ * 少しずつ受け取るときは、本文が届くたびに onDelta へ渡す。
+ */
+async function requestGemini(apiKey, body, onDelta) {
   let res;
   let chunks;
   try {
@@ -649,11 +856,7 @@ async function askGemini(contents, { systemPrompt = buildSystemPrompt(), tools =
     res = await net.fetch(onDelta ? GEMINI_STREAM_ENDPOINT : GEMINI_ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: systemPrompt }] },
-        contents,
-        ...(tools.length > 0 && { tools }),
-      }),
+      body: JSON.stringify(body),
       signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
     });
 
@@ -670,39 +873,16 @@ async function askGemini(contents, { systemPrompt = buildSystemPrompt(), tools =
   }
 
   if (!res.ok) {
-    const body = chunks[0];
-    const detail = `status=${res.status} ${body?.error?.status ?? ''} ${body?.error?.message ?? ''}`;
-    const reason = body?.error?.details?.find((d) => d.reason)?.reason;
+    const error = chunks[0]?.error;
+    const detail = `status=${res.status} ${error?.status ?? ''} ${error?.message ?? ''}`;
+    const reason = error?.details?.find((d) => d.reason)?.reason;
     if (reason === 'API_KEY_INVALID' || res.status === 401 || res.status === 403) {
       throw new GeminiError('bad-key', detail);
     }
     if (res.status === 429) throw new GeminiError('rate-limit', detail);
     throw new GeminiError('failed', detail);
   }
-
-  // 少しずつ受け取ったときは、本文をつなげ、終わり方と検索の情報は最後に来たものを使う
-  const blockReason = chunks.find((chunk) => chunk?.promptFeedback?.blockReason)?.promptFeedback.blockReason;
-  if (blockReason) {
-    throw new GeminiError('blocked', `blockReason=${blockReason}`);
-  }
-
-  const candidates = chunks.map((chunk) => chunk?.candidates?.[0]).filter(Boolean);
-  const text = candidates.map(candidateText).join('').trim();
-  const finishReason = candidates.findLast((candidate) => candidate.finishReason)?.finishReason;
-  const groundingMetadata = candidates.findLast((candidate) => candidate.groundingMetadata)?.groundingMetadata;
-
-  if (!text) {
-    throw new GeminiError(
-      finishReason === 'SAFETY' || finishReason === 'PROHIBITED_CONTENT' ? 'blocked' : 'failed',
-      `返事が空でした finishReason=${finishReason}`,
-    );
-  }
-
-  return {
-    text,
-    sources: extractSources(groundingMetadata),
-    searchSuggestions: extractSearchSuggestions(groundingMetadata),
-  };
+  return chunks;
 }
 
 /** 返事の本文（考えている途中の文は除く） */

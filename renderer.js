@@ -307,8 +307,9 @@ let dragging = false;
 
 mascotEl.addEventListener('mousedown', (event) => {
   if (event.button !== 0) return;
-  // 転がっている途中で掴まれたら、その場で転がるのをやめる
+  // 転がっている・はねている途中で掴まれたら、その場でやめる
   stopRoll();
+  stopBounce();
   pointerDownAt = { x: event.screenX, y: event.screenY };
   dragging = false;
   window.mascot.dragStart();
@@ -501,7 +502,43 @@ async function ask(text) {
     mascotEl.classList.remove('talking');
     bubbleEl.classList.remove('thinking');
   }
+  // 返事を待っている間に時間が来たお知らせがあれば、ここで出す
+  showReminders();
 }
+
+// ---------------------------------------------------------------------------
+// タイマーとリマインダーのお知らせ（時間の管理はメインプロセス）
+// ---------------------------------------------------------------------------
+// 吹き出しで知らせて、豆をはねさせる。返事を待っている間に来たら、返事が出てから知らせる
+let pendingReminders = [];
+
+window.mascot.onReminder((text) => {
+  pendingReminders.push(text);
+  showReminders();
+});
+
+function showReminders() {
+  if (busy || pendingReminders.length === 0) return;
+  say(pendingReminders.join('\n\n'), { keep: true });
+  pendingReminders = [];
+  startBounce();
+}
+
+function startBounce() {
+  stopRoll();
+  // 続けて知らせたときも、はね始めからやり直す
+  mascotEl.classList.remove('bouncing');
+  void mascotEl.offsetWidth;
+  mascotEl.classList.add('bouncing');
+}
+
+function stopBounce() {
+  mascotEl.classList.remove('bouncing');
+}
+
+mascotEl.addEventListener('animationend', (event) => {
+  if (event.animationName === 'bounce') stopBounce();
+});
 
 // 右クリックでメニュー（履歴・リセット・終了）。トレイが無い環境でも使えるように
 mascotEl.addEventListener('contextmenu', (event) => {

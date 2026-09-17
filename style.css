@@ -312,6 +312,28 @@ body {
   }
 }
 
+/* タイマーやリマインダーで知らせるとき、その場でぴょんぴょんはねる（6回）。
+   影は地面に残して豆だけ上げる。SVG の中は 1/5 ほどに縮むので、70 で画面の 14px ほど */
+#mascot.bouncing .roller {
+  animation: bounce 0.5s ease-in-out 6;
+  --bounce-height: -70px;
+}
+
+#mascot.has-image.bouncing #mascot-img {
+  animation: bounce 0.5s ease-in-out 6;
+  --bounce-height: -14px;
+}
+
+@keyframes bounce {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  45% {
+    transform: translateY(var(--bounce-height));
+  }
+}
+
 @keyframes rock {
   0%,
   100% {

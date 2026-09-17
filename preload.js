@@ -23,6 +23,11 @@ contextBridge.exposeInMainWorld('mascot', {
   showMenu: () => ipcRenderer.send('menu:show'),
   openLink: (url) => ipcRenderer.send('link:open', url),
   getHistory: () => ipcRenderer.invoke('chat:history'),
+  onReminder: (callback) => {
+    const listener = (_event, text) => callback(text);
+    ipcRenderer.on('reminder:due', listener);
+    return () => ipcRenderer.removeListener('reminder:due', listener);
+  },
   onShowHistory: (callback) => {
     const listener = () => callback();
     ipcRenderer.on('history:show', listener);
