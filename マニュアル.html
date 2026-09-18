@@ -1,0 +1,339 @@
+<title>枝豆マスコットの手引き</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700&family=M+PLUS+1p:wght@400;700&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+:root{
+  --ground:#f5f7f0;
+  --paper:#ffffff;
+  --ink:#1f2a17;
+  --ink-soft:#56614c;
+  --line:#dce3d2;
+  --pod:#5aa832;
+  --pod-deep:#3d6b1f;
+  --pod-wash:#e7f3d8;
+  --caution:#9a5b00;
+  --caution-wash:#fdf1dc;
+  --code-bg:#eef2e8;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#141911;
+    --paper:#1c2318;
+    --ink:#e6edde;
+    --ink-soft:#a3ae98;
+    --line:#2f3a29;
+    --pod:#8fd14f;
+    --pod-deep:#b6e58a;
+    --pod-wash:#243220;
+    --caution:#f0b45a;
+    --caution-wash:#2e2415;
+    --code-bg:#11160e;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#141911;
+  --paper:#1c2318;
+  --ink:#e6edde;
+  --ink-soft:#a3ae98;
+  --line:#2f3a29;
+  --pod:#8fd14f;
+  --pod-deep:#b6e58a;
+  --pod-wash:#243220;
+  --caution:#f0b45a;
+  --caution-wash:#2e2415;
+  --code-bg:#11160e;
+}
+*{box-sizing:border-box}
+body{
+  background:var(--ground);
+  color:var(--ink);
+  font-family:"M PLUS 1p","Hiragino Sans","Yu Gothic UI","Meiryo",sans-serif;
+  font-size:16px;
+  line-height:1.85;
+  padding-inline:20px;
+  padding-block:40px 64px;
+}
+.wrap{max-width:680px;margin:0 auto;display:flex;flex-direction:column;gap:48px}
+h1,h2,h3{font-family:"Zen Maru Gothic","Hiragino Maru Gothic ProN","Yu Gothic UI",sans-serif;text-wrap:balance;margin:0;line-height:1.35}
+h1{font-size:2rem;font-weight:700}
+h2{font-size:1.4rem;font-weight:700;padding-bottom:8px;border-bottom:2px solid var(--line)}
+h3{font-size:1.1rem;font-weight:700}
+p{margin:0}
+header{display:grid;grid-template-columns:auto 1fr;gap:20px;align-items:center}
+header svg{width:72px;height:auto}
+.lede{color:var(--ink-soft)}
+section{display:flex;flex-direction:column;gap:20px}
+.need{display:flex;flex-wrap:wrap;gap:8px 24px;padding:16px 20px;background:var(--pod-wash);border-radius:12px}
+.need li{list-style:none}
+.need ul{margin:0;padding:0;display:flex;flex-direction:column;gap:4px}
+.need strong{color:var(--pod-deep)}
+ol.steps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:28px;counter-reset:step}
+ol.steps>li{counter-increment:step;display:grid;grid-template-columns:40px 1fr;gap:16px}
+ol.steps>li::before{
+  content:counter(step);
+  width:40px;height:40px;border-radius:50% 50% 50% 50% / 58% 58% 42% 42%;
+  background:var(--pod);color:var(--paper);
+  font-family:"Zen Maru Gothic",sans-serif;font-weight:700;font-size:1.15rem;
+  display:grid;place-items:center;
+}
+:root[data-theme="dark"] ol.steps>li::before{color:#141911}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) ol.steps>li::before{color:#141911}}
+.step{display:flex;flex-direction:column;gap:10px;min-width:0}
+.step ul{margin:0;padding-left:1.2em;display:flex;flex-direction:column;gap:4px}
+.path,code{font-family:"JetBrains Mono",Consolas,monospace;font-size:.88em;background:var(--code-bg);padding:1px 6px;border-radius:4px;word-break:break-all}
+.cmd{display:flex;align-items:stretch;background:var(--code-bg);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.cmd pre{margin:0;padding:12px 14px;flex:1;overflow-x:auto;font-family:"JetBrains Mono",Consolas,monospace;font-size:.9rem}
+.cmd button{border:0;border-left:1px solid var(--line);background:var(--paper);color:var(--pod-deep);font:inherit;font-size:.85rem;padding:0 14px;cursor:pointer}
+.cmd button:focus-visible,summary:focus-visible{outline:3px solid var(--pod);outline-offset:2px}
+.field{display:grid;grid-template-columns:auto 1fr;gap:4px 16px;padding:12px 16px;background:var(--paper);border:1px solid var(--line);border-radius:8px}
+.field dt{color:var(--ink-soft);font-size:.9rem}
+.field dd{margin:0}
+.note{padding:12px 16px;border-radius:8px;background:var(--caution-wash);color:var(--ink);border-left:4px solid var(--caution)}
+.note b{color:var(--caution)}
+details{background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:0 16px}
+details[open]{padding-bottom:14px}
+summary{cursor:pointer;padding:12px 0;font-weight:700}
+details p{margin-bottom:10px}
+details .cmd+.cmd{margin-top:8px}
+section>ol{margin:0;padding-left:1.4em;display:flex;flex-direction:column;gap:4px}
+a{color:var(--pod-deep);text-underline-offset:3px}
+.trouble{display:flex;flex-direction:column;gap:12px}
+.bubble{display:inline-block;background:var(--paper);border:1px solid var(--line);border-radius:14px 14px 14px 4px;padding:6px 12px;font-size:.95rem}
+.qa{display:flex;flex-direction:column;gap:6px;padding:14px 0;border-top:1px solid var(--line)}
+.qa:first-child{border-top:0;padding-top:0}
+table{border-collapse:collapse;width:100%}
+.tbl{overflow-x:auto}
+th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-weight:700;color:var(--ink-soft);font-size:.9rem;white-space:nowrap}
+footer{color:var(--ink-soft);font-size:.85rem}
+@media (max-width:480px){
+  h1{font-size:1.6rem}
+  header{grid-template-columns:1fr}
+  header svg{width:56px}
+  ol.steps>li{grid-template-columns:32px 1fr;gap:12px}
+  ol.steps>li::before{width:32px;height:32px;font-size:1rem}
+}
+</style>
+
+<div class="wrap">
+  <header>
+    <svg viewBox="10 -10 180 180" aria-hidden="true">
+      <defs>
+        <radialGradient id="g" cx="0.38" cy="0.32" r="0.75">
+          <stop offset="0" stop-color="#c9ef8a"/><stop offset="0.5" stop-color="#8fd14f"/><stop offset="1" stop-color="#5aa832"/>
+        </radialGradient>
+      </defs>
+      <g transform="rotate(-10 100 80)">
+        <path d="M30 80 C26 40 70 18 110 22 C156 26 182 52 178 88 C174 122 140 138 104 132 C88 129 80 118 66 120 C44 124 32 108 30 80 Z" fill="url(#g)" stroke="#3d6b1f" stroke-width="8" stroke-linejoin="round"/>
+        <ellipse cx="76" cy="50" rx="24" ry="11" transform="rotate(-18 76 50)" fill="#fff" fill-opacity="0.45"/>
+      </g>
+    </svg>
+    <div>
+      <h1>枝豆マスコットの手引き</h1>
+      <p class="lede">ほかの PC にインストールして、話しかけられるようにするまでの手順です。</p>
+    </div>
+  </header>
+
+  <section>
+    <h2>用意するもの</h2>
+    <div class="need">
+      <ul>
+        <li><strong>インストーラー</strong>　<span class="path">DesktopMascot-Setup.exe</span>（約 106MB）</li>
+        <li><strong>Gemini の API キー</strong>　今の PC で使っているのと同じキーで使えます</li>
+        <li><strong>64 ビット版の Windows</strong>　10 か 11</li>
+      </ul>
+    </div>
+    <p>インストーラーは、元の PC の <span class="path">C:\Users\user\Desktop-Mascot\dist\</span> に入っています。</p>
+  </section>
+
+  <section>
+    <h2>インストールの手順</h2>
+    <ol class="steps">
+      <li>
+        <div class="step">
+          <h3>インストーラーを持っていく</h3>
+          <p>USB メモリや Google ドライブを使って、インストーラーを新しい PC にコピーします。置く場所はデスクトップなど、どこでもかまいません。</p>
+        </div>
+      </li>
+      <li>
+        <div class="step">
+          <h3>ダブルクリックしてインストールする</h3>
+          <p>確認の画面は出ずにインストールが終わり、マスコットが画面の右下に出てきます。</p>
+          <div class="note"><b>青い「Windows によって PC が保護されました」が出たとき</b><br>「詳細情報」を押すと出てくる「実行」を押してください。自作のアプリには発行元の証明が付いていないため、この画面が出ます。</div>
+          <div class="note"><b>アバストなどのセキュリティソフトが止めたとき</b><br>危ないファイルではありません。下の「<a href="#exceptions">セキュリティソフトの例外に入れる</a>」のとおり例外に入れてから、もう一度ダブルクリックしてください。</div>
+        </div>
+      </li>
+      <li>
+        <div class="step">
+          <h3>API キーを登録する</h3>
+          <p>スタートボタンを押して「<b>環境変数</b>」と入力し、「<b>環境変数を編集</b>」を開きます。上の「<b>ユーザー環境変数</b>」の「新規」を押して、次のように入力します。</p>
+          <dl class="field">
+            <dt>変数名</dt><dd><code>GEMINI_API_KEY</code></dd>
+            <dt>変数値</dt><dd>自分の API キー</dd>
+          </dl>
+          <ul>
+            <li>変数名は 1 文字でも違うと読まれません。コピーして貼り付けてください</li>
+            <li>下の「システム環境変数」ではなく、上の「ユーザー環境変数」に入れます</li>
+            <li>最後は開いた画面をすべて OK で閉じます</li>
+          </ul>
+          <details>
+            <summary>PowerShell で登録する場合</summary>
+            <p>次の 1 行を実行します。<code>ここにキー</code> の部分は自分のキーに置き換えてください。</p>
+            <div class="cmd"><pre id="cmd-setx">setx GEMINI_API_KEY "ここにキー"</pre><button type="button" id="copy-setx" data-target="cmd-setx">コピー</button></div>
+          </details>
+        </div>
+      </li>
+      <li>
+        <div class="step">
+          <h3>マスコットを起動し直す</h3>
+          <p>マスコットは起動したときにキーを読みます。そのため、一度終了してから起動し直します。</p>
+          <ul>
+            <li>終了するときは、豆を右クリックして「終了」を押します</li>
+            <li>起動するときは、スタートメニューの「Desktop Mascot」を開きます</li>
+          </ul>
+        </div>
+      </li>
+      <li>
+        <div class="step">
+          <h3>話しかけて確かめる</h3>
+          <p>豆をクリックすると入力欄が出ます。「今日の天気は？」などと話しかけて、吹き出しで返事が来れば準備完了です。</p>
+        </div>
+      </li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>使い方</h2>
+    <div class="tbl">
+      <table>
+        <tr><th>やりたいこと</th><th>操作</th></tr>
+        <tr><td>話しかける</td><td>豆をクリックして、入力欄に書く</td></tr>
+        <tr><td>タイマー・リマインダー</td><td>「3分たったら教えて」「明日の9時に歯医者って教えて」と話しかける。時間が来たら音が鳴って、豆がはねて知らせる。「今の予定は？」「歯医者のは取り消して」も話しかけて行う</td></tr>
+        <tr><td>昔の話を思い出してもらう</td><td>「前にキャンプの話ってしたっけ？」「一年前に仕事のことで相談しなかった？」と話しかける</td></tr>
+        <tr><td>置き場所を変える</td><td>豆をドラッグする</td></tr>
+        <tr><td>隠す・また出す</td><td>画面右下のトレイにある豆のアイコンをクリックする</td></tr>
+        <tr><td>会話の履歴を見る・リセット</td><td>豆を右クリックして、メニューから選ぶ</td></tr>
+        <tr><td>Windows と一緒に起動しない</td><td>右クリックメニューの「起動時に自動で立ち上げる」のチェックを外す</td></tr>
+        <tr><td>ほかの PC と会話を共有する</td><td>右クリックメニューの「ほかの PC と会話を共有」（<a href="#share">下の手順</a>）</td></tr>
+        <tr><td>バージョンを確かめる</td><td>右クリックメニューの「このアプリについて」</td></tr>
+        <tr><td>終了する</td><td>右クリックメニューの「終了」</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>うまくいかないとき</h2>
+    <div class="trouble">
+      <div class="qa">
+        <span class="bubble">APIキーが見つからないみたい。GEMINI_API_KEY を設定してね。</span>
+        <p>キーがまだ読まれていません。手順 3 の変数名が合っているか確かめてから、手順 4 のとおり起動し直してください。それでも直らないときは、PC を再起動してください。</p>
+      </div>
+      <div class="qa">
+        <span class="bubble">APIキーが正しくないみたい。GEMINI_API_KEY を確かめてね。</span>
+        <p>キーの値が違います。前後に空白が入っていないか、途中で切れていないか確かめてください。</p>
+      </div>
+      <div class="qa">
+        <span class="bubble">喋りすぎたか、検索の利用上限に達したかもしれない。</span>
+        <p>短い時間に使いすぎました。少し待ってから話しかけてください。</p>
+      </div>
+      <div class="qa">
+        <span class="bubble">ネットにつながらないみたい。</span>
+        <p>インターネットにつながっているか確かめてください。</p>
+      </div>
+      <div class="qa">
+        <p><b>豆が出てこない</b></p>
+        <p>隠れているだけかもしれません。トレイの豆アイコンをクリックしてください。アイコンが見えないときは、トレイの「^」を押すと出てきます。</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="share">
+    <h2>ほかの PC と会話を共有する</h2>
+    <p>Google ドライブのフォルダに会話を保存して、どの PC のマスコットとも同じ会話を続けられるようにします。ほかの PC で話した内容は、5 秒ほどで反映されます。</p>
+    <div class="need">
+      <ul>
+        <li><strong>Google ドライブのアプリ</strong>　共有するすべての PC に入れて、同じ Google アカウントでログインしておく</li>
+      </ul>
+    </div>
+    <ol class="steps">
+      <li>
+        <div class="step">
+          <h3>共有するフォルダを選ぶ</h3>
+          <p>豆を右クリックして「<b>ほかの PC と会話を共有</b>」→「<b>共有するフォルダを選ぶ…</b>」を押します。</p>
+        </div>
+      </li>
+      <li>
+        <div class="step">
+          <h3>マイドライブを選ぶ</h3>
+          <p>「マイドライブ」を選んで「<b>このフォルダで共有</b>」を押します。中に <span class="path">Desktop Mascot</span> フォルダが作られ、会話はそこに保存されます。</p>
+          <p>「会話の共有を始めました」と出れば完了です。</p>
+        </div>
+      </li>
+      <li>
+        <div class="step">
+          <h3>ほかの PC でも同じフォルダを選ぶ</h3>
+          <p>ほかの PC でも手順 1〜2 を行い、同じ「マイドライブ」を選びます。その PC にあった会話も混ぜてまとめられるので、消えることはありません。</p>
+        </div>
+      </li>
+    </ol>
+    <ul>
+      <li>2 台でほぼ同時に話しても、どちらの会話も残ります</li>
+      <li>どれか 1 台で「会話をリセット」すると、すべての PC で消えます</li>
+      <li>共有をやめるときは「<b>共有をやめる</b>」を押します。それまでの会話は、その PC にも残ります</li>
+      <li>会話の内容は Google ドライブに保存されます。Google アカウントを人と共用している場合は使わないでください</li>
+    </ul>
+  </section>
+
+  <section id="exceptions">
+    <h2>セキュリティソフトの例外に入れる</h2>
+    <p>このアプリには、お店で売っているアプリのような発行元の証明（署名）が付いていません。そのため、アバストなどが「知らないアプリ」として警告することがあります。次の 2 つのファイルを例外に入れると、警告が出なくなります。</p>
+    <div class="note"><b>フォルダではなく、ファイルを指定します</b><br>フォルダを指定すると、アバストに「範囲が広すぎる」と言われて入れられません。</div>
+    <h3>例外に入れるファイル</h3>
+    <p><b>アプリ本体</b>（更新しても名前は変わらないので、入れるのは 1 回だけ）</p>
+    <div class="cmd"><pre id="path-install">%LOCALAPPDATA%\Programs\desktop-mascot\Desktop Mascot.exe</pre><button type="button" id="copy-install" data-target="path-install">コピー</button></div>
+    <p><b>インストーラー</b>（USB メモリからコピーしたもの。新しい版も同じ名前なので、入れるのは 1 回だけ）</p>
+    <div class="cmd"><pre id="path-bundle">%USERPROFILE%\Desktop\DesktopMascot_持ち出し用\DesktopMascot-Setup.exe</pre><button type="button" id="copy-bundle" data-target="path-bundle">コピー</button></div>
+    <p>デスクトップ以外に置いたときは、その場所に読み替えてください。</p>
+    <div class="note"><b>アバストが <code>%LOCALAPPDATA%</code> のような書き方を受け付けないとき</b><br>エクスプローラーのアドレス欄に <code>%LOCALAPPDATA%\Programs\desktop-mascot</code> を貼り付けて Enter を押します。開いたら「Desktop Mascot.exe」を Shift キーを押しながら右クリックし、「パスのコピー」を選びます。コピーされたパスを、前後の <code>"</code> を消してから使います。</div>
+    <h3>アバストでの入れ方</h3>
+    <ol>
+      <li>アバストを開き、右上の「メニュー」→「設定」を押す</li>
+      <li>「一般」→「例外」を開き、「例外を追加」を押す</li>
+      <li>上のファイルのパスを貼り付けて「例外を追加」を押す</li>
+      <li>もう 1 つのファイルも同じように入れる</li>
+    </ol>
+    <p>アバストのバージョンによって、メニューの名前や場所が少し違うことがあります。</p>
+    <details>
+      <summary>元の PC（開発に使っている PC）の場合</summary>
+      <p>インストーラーは開発用のフォルダで作るので、こちらを例外に入れます。</p>
+      <div class="cmd"><pre id="path-dev">C:\Users\user\Desktop-Mascot\dist\DesktopMascot-Setup.exe</pre><button type="button" id="copy-dev" data-target="path-dev">コピー</button></div>
+      <div class="cmd"><pre id="path-dev-install">C:\Users\user\AppData\Local\Programs\desktop-mascot\Desktop Mascot.exe</pre><button type="button" id="copy-dev-install" data-target="path-dev-install">コピー</button></div>
+    </details>
+  </section>
+
+  <section>
+    <h2>知っておくこと</h2>
+    <ul>
+      <li><b>料金はキーの持ち主にかかります。</b>同じキーを使うと、どの PC で使った分も合算されます。</li>
+      <li><b>会話の履歴は、共有しなければ PC ごとに別々です。</b>保存場所は <span class="path">%APPDATA%\Desktop Mascot</span> です。共有中は <span class="path">マイドライブ\Desktop Mascot</span> に保存されます。</li>
+      <li><b>リマインダーは PC ごとです。</b>会話を共有していても、登録した PC のマスコットだけが知らせます。PC を切っている間に時間が過ぎたものは、次に起動したときに知らせます。タイマーはマスコットを終了すると消えます。</li>
+      <li><b>話した中身は「保管庫」にずっと残ります。</b>「会話をリセット」しても保管庫は消えないので、あとから探せます。保管庫は会話の履歴と同じフォルダの <span class="path">archive</span> です（共有中は Google ドライブの中）。</li>
+      <li><b>アンインストールするとき</b>は、Windows の「設定」→「アプリ」→「インストールされているアプリ」で「Desktop Mascot」を選びます。</li>
+    </ul>
+  </section>
+
+  <footer>Desktop Mascot 1.0.11 用</footer>
+</div>
+
+<script>
+document.querySelectorAll('.cmd button').forEach(function (btn) {
+  btn.addEventListener('click', function () {
+    var text = document.getElementById(btn.dataset.target).textContent;
+    var done = function () { btn.textContent = 'コピーしました'; setTimeout(function () { btn.textContent = 'コピー'; }, 1800); };
+    try {
+      navigator.clipboard.writeText(text).then(done, function () { btn.textContent = '選択してコピーしてください'; });
+    } catch (e) { btn.textContent = '選択してコピーしてください'; }
+  });
+});
+</script>
