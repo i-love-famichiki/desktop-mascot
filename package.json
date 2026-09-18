@@ -12,7 +12,7 @@
   },
   "keywords": [],
   "author": "i-love-famichiki",
-  "license": "ISC",
+  "license": "MIT",
   "type": "commonjs",
   "devDependencies": {
     "electron": "44.3.0",
