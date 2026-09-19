@@ -3,7 +3,7 @@
 // アプリの設定を JSON ファイルに保存する（終了しても覚えておく）。
 // Electron に依存しないので、node だけでテストできる（test/settings.test.js）。
 //
-// ファイルの中身:  { "openAtLogin": true, "historyFolder": "" }
+// ファイルの中身:  { "openAtLogin": true, "historyFolder": "", "lastShareParent": "", "calendarEnabled": false }
 
 const fs = require('fs');
 const path = require('path');
@@ -13,6 +13,10 @@ const DEFAULT_SETTINGS = Object.freeze({
   openAtLogin: true,
   // ほかの PC と会話を共有するフォルダ（Google ドライブの中など）。空なら共有しない
   historyFolder: '',
+  // 共有フォルダを選ぶダイアログを次に開く場所（共有をやめても覚えておく）
+  lastShareParent: '',
+  // Google カレンダー連携を使うか（ログイン情報は別のファイル。google-auth.js）
+  calendarEnabled: false,
 });
 
 /** 設定を読む。ファイルが無い・壊れている・知らない値は初期値で補う */

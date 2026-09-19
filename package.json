@@ -8,6 +8,7 @@
     "test": "node --test test/*.test.js",
     "mock-history": "node test/make-mock-history.js",
     "icon": "electron build/make-icon.js",
+    "tray-icon": "electron build/make-tray-icon.js",
     "dist": "electron-builder --win"
   },
   "keywords": [],
@@ -45,6 +46,12 @@
       "reminder-store.js",
       "settings.js",
       "sse.js",
+      "image-compress.js",
+      "settings-window.html",
+      "settings-window.js",
+      "settings-preload.js",
+      "google-auth.js",
+      "calendar.js",
       "assets/**",
       "build/icon.png"
     ],

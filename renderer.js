@@ -422,7 +422,9 @@ inputEl.addEventListener('keydown', (event) => {
   if (!text || busy) return;
   inputEl.value = '';
   resizeInput();
-  ask(text);
+  // 画像を受け取って待っている間は、話しかけた言葉を「どれくらい小さくするか」として扱う
+  if (pendingImages) compress(text);
+  else ask(text);
 });
 
 // ---------------------------------------------------------------------------
@@ -503,6 +505,67 @@ async function ask(text) {
     bubbleEl.classList.remove('thinking');
   }
   // 返事を待っている間に時間が来たお知らせがあれば、ここで出す
+  showReminders();
+}
+
+// ---------------------------------------------------------------------------
+// 画像を小さくする（ドロップ → 話しかけて大きさを指定 → デスクトップに置く）
+// ---------------------------------------------------------------------------
+const IMAGE_EXTENSIONS = /\.(jpe?g|png)$/i;
+const COMPRESS_HELP = '「500KBにして」「50%にして」「半分にして」「メール添付用にして」みたいに言ってね。';
+
+// 受け取って、指定を待っている画像の場所。待っていないときは null
+let pendingImages = null;
+
+// ドロップを受け付ける。受け付けないと、Electron が画像そのものを窓に開いてしまう
+window.addEventListener('dragover', (event) => {
+  event.preventDefault();
+  event.dataTransfer.dropEffect = busy ? 'none' : 'copy';
+});
+
+window.addEventListener('drop', (event) => {
+  event.preventDefault();
+  if (busy) return;
+  const paths = [...event.dataTransfer.files].map((file) => window.mascot.pathForFile(file)).filter(Boolean);
+  if (paths.length === 0) return;
+  if (!paths.some((file) => IMAGE_EXTENSIONS.test(file))) {
+    say('JPEG か PNG の画像を渡してね。');
+    return;
+  }
+
+  // 画像でないファイルも一緒に預かり、処理のときに「処理できなかった」と伝える
+  pendingImages = paths;
+  say(`画像を${paths.length}枚受け取ったよ。どれくらい小さくする？\n${COMPRESS_HELP}\n（やめるときは「やめて」）`, { keep: true });
+  inputRowEl.classList.remove('hidden');
+  resizeInput();
+  window.mascot.focusWindow();
+  inputEl.focus();
+});
+
+window.mascot.onCompressProgress((text) => {
+  if (busy) say(text, { keep: true });
+});
+
+async function compress(text) {
+  busy = true;
+  mascotEl.classList.add('talking');
+  say('どれどれ…', { keep: true });
+  try {
+    const result = await window.mascot.compressImages(pendingImages, text);
+    if (result.status === 'unknown') {
+      say(`ごめん、どれくらいにするか分からなかった。\n${COMPRESS_HELP}\n（やめるときは「やめて」）`, { keep: true });
+    } else {
+      pendingImages = null;
+      say(result.status === 'cancel' ? 'わかった、やめておくね。' : result.text, { keep: true });
+    }
+  } catch (err) {
+    pendingImages = null;
+    console.error('[image]', err);
+    say('ごめん、画像を小さくしている途中でエラーが起きちゃった。', { keep: true });
+  } finally {
+    busy = false;
+    mascotEl.classList.remove('talking');
+  }
   showReminders();
 }
 

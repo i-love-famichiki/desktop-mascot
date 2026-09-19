@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain, screen, Menu, Tray, net, shell, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, screen, Menu, Tray, net, shell, dialog, nativeImage, safeStorage } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const { HistoryStore } = require('./history-store');
@@ -8,6 +8,20 @@ const { searchConversations, mergeMessages, parseDay } = require('./archive-stor
 const { ReminderStore } = require('./reminder-store');
 const { loadSettings, saveSettings } = require('./settings');
 const { createSseParser } = require('./sse');
+const { parseCompressCommand, compressImages, describeResult } = require('./image-compress');
+const { GoogleAuth, GoogleAuthError } = require('./google-auth');
+const {
+  Calendar,
+  CalendarError,
+  DAY_MS,
+  localDateKey,
+  describeEvent,
+  dueEventNotices,
+  noticeKey,
+  eventNoticeText,
+  shouldBrief,
+  briefingText,
+} = require('./calendar');
 
 // 自動起動（Windows にサインインしたとき立ち上がる）で起動されたときに付く目印
 const AUTOSTART_ARG = '--autostart';
@@ -77,6 +91,7 @@ function buildSystemPrompt() {
     '口調は親しみやすく、少しだけ子どもっぽく、絵文字は使いません。',
     '返事は必ず日本語で、基本は2〜3文の短さに収めてください。画面の小さな吹き出しに表示されます。',
     ...reminderPromptLines(),
+    ...calendarPromptLines(),
     '',
     '以前の会話について聞かれ、下の会話や要約だけでは詳しく分からないときは、search_history で保管庫を探してから答えてください。',
     '言い換えも考えて、言葉はいくつか渡してください（例: 転職、仕事を変える、退職）。',
@@ -141,6 +156,8 @@ function memoryPromptLines() {
 let win = null;
 /** @type {Tray | null} */
 let tray = null;
+/** 設定ウィンドウ。1つだけ開く（開いていないときは null） @type {BrowserWindow | null} */
+let settingsWin = null;
 
 // 会話履歴と設定の保存先。exe ではアプリのフォルダに書き込めないことがあるので
 // アプリ用の保存場所に置く。開発中（npm start）は今まで通りプロジェクトの data/ に置く
@@ -174,6 +191,20 @@ const reminders = new ReminderStore(
     ? path.resolve(process.env.MASCOT_REMINDER_FILE)
     : path.join(dataDir, 'reminders.json'),
 );
+
+// Google へのログインとカレンダー。ログイン情報はほかの PC と分けたいので、共有中でもこの PC の中に置く。
+// テストのときは MASCOT_GOOGLE_DIR で置き場所を差し替えられる
+const googleDir = process.env.MASCOT_GOOGLE_DIR ? path.resolve(process.env.MASCOT_GOOGLE_DIR) : dataDir;
+const googleAuth = new GoogleAuth({
+  clientFile: path.join(googleDir, 'google-client.json'),
+  tokenFile: path.join(googleDir, 'google-token.json'),
+  fetch: (...args) => net.fetch(...args),
+  openExternal: (url) => shell.openExternal(url),
+  safeStorage,
+});
+const calendar = new Calendar({ auth: googleAuth, fetch: (...args) => net.fetch(...args) });
+// 朝のまとめを最後に言った日。PC ごとに覚えておく
+const calendarStateFile = path.join(googleDir, 'calendar-state.json');
 
 // ウィンドウの基本の高さ。長い返事のときだけ一時的に上へ伸ばす
 const WINDOW_MIN_HEIGHT = 420;
@@ -286,25 +317,9 @@ function buildMenu() {
       },
     },
     { label: '会話をリセット', click: confirmReset },
-    {
-      label: 'ほかの PC と会話を共有',
-      submenu: [
-        {
-          label: settings.historyFolder ? `共有中: ${settings.historyFolder}` : '共有していません',
-          enabled: false,
-        },
-        { label: '共有するフォルダを選ぶ…', click: chooseShareFolder },
-        { label: '共有をやめる', enabled: Boolean(settings.historyFolder), click: stopSharing },
-      ],
-    },
     { type: 'separator' },
-    {
-      label: '起動時に自動で立ち上げる',
-      type: 'checkbox',
-      checked: settings.openAtLogin,
-      // チェックの表示は押した時点で切り替わっているので、その値を保存する
-      click: (item) => setOpenAtLogin(item.checked),
-    },
+    // 自動起動や会話の共有などの設定は、設定ウィンドウにまとめている
+    { label: '設定を開く…', click: openSettingsWindow },
     { type: 'separator' },
     { label: 'このアプリについて', click: showAbout },
     { label: '終了', click: () => app.quit() },
@@ -318,7 +333,7 @@ function setOpenAtLogin(enabled) {
   settings = { ...settings, openAtLogin: enabled };
   saveSettings(settingsFile, settings);
   applyOpenAtLogin();
-  refreshTrayMenu();
+  notifySettingsChanged();
 }
 
 /**
@@ -346,13 +361,28 @@ function applyOpenAtLogin() {
 // 会話の履歴を Google ドライブなどのフォルダに置き、ほかの PC のマスコットと同じファイルを使う。
 // 同期はドライブのアプリに任せ、こちらは保存のたびに混ぜることと、変化を見に行くことだけをする。
 
-function showDialog(options) {
-  return win ? dialog.showMessageBox(win, options) : dialog.showMessageBox(options);
+/** ダイアログを載せる窓。設定ウィンドウから操作しているときは、そちらに載せる */
+function dialogParent() {
+  return settingsWin?.isFocused() ? settingsWin : win;
 }
 
-/** 共有フォルダを最初に開く場所。Google ドライブか OneDrive があればそこから */
+function showDialog(options) {
+  const parent = dialogParent();
+  return parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options);
+}
+
+/**
+ * 共有フォルダを最初に開く場所。
+ * 前に選んだ場所があればそこから、無ければ Google ドライブか OneDrive があればそこから
+ */
 function defaultShareParent() {
-  const candidates = ['G:\\マイドライブ', 'G:\\My Drive', process.env.OneDrive, app.getPath('documents')];
+  const candidates = [
+    settings.lastShareParent,
+    'G:\\マイドライブ',
+    'G:\\My Drive',
+    process.env.OneDrive,
+    app.getPath('documents'),
+  ];
   return candidates.find((dir) => dir && fs.existsSync(dir));
 }
 
@@ -364,12 +394,18 @@ async function chooseShareFolder() {
     defaultPath: defaultShareParent(),
     properties: ['openDirectory', 'createDirectory'],
   };
-  const { canceled, filePaths } = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options);
+  const owner = dialogParent();
+  const { canceled, filePaths } = owner ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options);
   if (canceled || !filePaths[0]) return;
 
   // 選んだフォルダの中に専用のフォルダを作る。専用のフォルダそのものを選んだときはそのまま使う
   const picked = filePaths[0];
   const folder = path.basename(picked) === SHARE_SUBFOLDER ? picked : path.join(picked, SHARE_SUBFOLDER);
+
+  // 次に選ぶときも同じ場所から探せるよう覚えておく（共有をやめても消さない）
+  const parent = path.basename(picked) === SHARE_SUBFOLDER ? path.dirname(picked) : picked;
+  settings = { ...settings, lastShareParent: parent };
+  saveSettings(settingsFile, settings);
 
   try {
     await switchHistoryFolder(folder);
@@ -414,7 +450,7 @@ async function switchHistoryFolder(folder) {
   }
   saveSettings(settingsFile, settings);
   watchSharedHistory();
-  refreshTrayMenu();
+  notifySettingsChanged();
 }
 
 let watchedFile = null;
@@ -434,6 +470,149 @@ function watchSharedHistory() {
     }).catch(() => {});
   });
 }
+
+// ---------------------------------------------------------------------------
+// 設定ウィンドウ（settings-window.html）
+// ---------------------------------------------------------------------------
+// 自動起動や会話の共有などの設定を1つの窓にまとめる。項目を足すときは
+// settings-window.html に行を足し、ここに読み書きの ipc を足す
+function openSettingsWindow() {
+  // もう開いていたら、新しく開かずに手前に出す
+  if (settingsWin) {
+    if (settingsWin.isMinimized()) settingsWin.restore();
+    settingsWin.show();
+    settingsWin.focus();
+    return;
+  }
+  // 項目が全部見える高さ。画面が小さいときは収まる高さにして、中でスクロールさせる
+  const { workArea } = screen.getPrimaryDisplay();
+  settingsWin = new BrowserWindow({
+    width: 480,
+    height: Math.min(780, workArea.height - 40),
+    useContentSize: true,
+    minWidth: 360,
+    minHeight: 300,
+    title: 'Desktop Mascot の設定',
+    icon: path.join(__dirname, 'build', 'icon.png'),
+    show: false,
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'settings-preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+  settingsWin.setMenu(null);
+  settingsWin.loadFile('settings-window.html');
+  settingsWin.once('ready-to-show', () => settingsWin?.show());
+  settingsWin.on('closed', () => {
+    settingsWin = null;
+  });
+}
+
+/** 設定ウィンドウに見せる今の設定 */
+function settingsState() {
+  return {
+    openAtLogin: settings.openAtLogin,
+    historyFolder: settings.historyFolder,
+    // 開発中（npm start）は Windows の自動起動の登録を変えないので、画面でそう伝える
+    isPackaged: app.isPackaged,
+    calendar: {
+      enabled: calendarActive(),
+      hasClient: googleAuth.hasClient(),
+      email: googleAuth.email,
+      signingIn: Boolean(googleAuth.signingIn),
+    },
+  };
+}
+
+/** 設定が変わったら、トレイのメニューと設定ウィンドウの表示を合わせる */
+function notifySettingsChanged() {
+  refreshTrayMenu();
+  if (settingsWin && !settingsWin.isDestroyed()) settingsWin.webContents.send('settings:changed', settingsState());
+}
+
+// 設定ウィンドウからの呼び出しだけを受け付ける
+function fromSettingsWindow(event) {
+  return settingsWin && event.sender === settingsWin.webContents;
+}
+
+ipcMain.handle('settings:get', (event) => (fromSettingsWindow(event) ? settingsState() : null));
+
+ipcMain.handle('settings:set-open-at-login', (event, enabled) => {
+  if (fromSettingsWindow(event)) setOpenAtLogin(Boolean(enabled));
+  return settingsState();
+});
+
+ipcMain.handle('settings:choose-share-folder', async (event) => {
+  if (fromSettingsWindow(event)) await chooseShareFolder();
+  return settingsState();
+});
+
+ipcMain.handle('settings:stop-sharing', async (event) => {
+  if (fromSettingsWindow(event) && settings.historyFolder) await stopSharing();
+  return settingsState();
+});
+
+// Google Cloud でダウンロードした、クライアント ID の JSON を選ぶ
+ipcMain.handle('settings:calendar-choose-client', async (event) => {
+  if (!fromSettingsWindow(event)) return settingsState();
+  const options = {
+    title: 'クライアント ID のファイル（JSON）を選ぶ',
+    buttonLabel: 'このファイルを使う',
+    defaultPath: app.getPath('downloads'),
+    filters: [{ name: 'JSON', extensions: ['json'] }],
+    properties: ['openFile'],
+  };
+  const { canceled, filePaths } = await dialog.showOpenDialog(settingsWin, options);
+  if (canceled || !filePaths[0]) return settingsState();
+  try {
+    googleAuth.importClientFile(filePaths[0]);
+  } catch (err) {
+    await showDialog({
+      type: 'error',
+      title: 'ファイルを使えませんでした',
+      message: 'クライアント ID のファイルとして読めませんでした。',
+      detail: `${err.message}\n\nGoogle Cloud の「クライアント」で「デスクトップ アプリ」を作り、「JSON をダウンロード」したファイルを選んでください。`,
+    });
+  }
+  notifySettingsChanged();
+  return settingsState();
+});
+
+// ブラウザで Google にログインする。ログインし直すと、アカウントの切り替えになる
+ipcMain.handle('settings:calendar-sign-in', async (event) => {
+  if (!fromSettingsWindow(event)) return settingsState();
+  const signingIn = googleAuth.signIn();
+  // 「ブラウザでログインしてください」の表示に切り替える
+  notifySettingsChanged();
+  try {
+    await signingIn;
+    // ログインしたら、そのままカレンダー連携を ON にする
+    setCalendarEnabled(true);
+  } catch (err) {
+    if (!(err instanceof GoogleAuthError && err.kind === 'canceled')) {
+      console.error('[google]', err.message);
+      await showDialog({ type: 'error', title: 'ログインできませんでした', message: 'Google にログインできませんでした。', detail: err.message });
+    }
+  }
+  notifySettingsChanged();
+  return settingsState();
+});
+
+ipcMain.handle('settings:calendar-sign-out', async (event) => {
+  if (!fromSettingsWindow(event)) return settingsState();
+  await googleAuth.signOut();
+  setCalendarEnabled(false);
+  return settingsState();
+});
+
+ipcMain.handle('settings:set-calendar-enabled', (event, enabled) => {
+  // ログインしていないときは ON にできない
+  if (fromSettingsWindow(event)) setCalendarEnabled(Boolean(enabled) && Boolean(googleAuth.account));
+  return settingsState();
+});
 
 // ---------------------------------------------------------------------------
 // このアプリについて（バージョン情報）
@@ -490,6 +669,7 @@ app.whenReady().then(async () => {
   store.load();
   watchSharedHistory();
   reminders.load();
+  googleAuth.load();
   setInterval(checkReminders, REMINDER_CHECK_INTERVAL_MS);
   try {
     createTray();
@@ -514,7 +694,10 @@ app.whenReady().then(async () => {
   });
 });
 
-app.on('window-all-closed', () => app.quit());
+// 自動起動の待ち時間中（マスコットの窓がまだ無い）に設定ウィンドウを閉じても、終了しない
+app.on('window-all-closed', () => {
+  if (win) app.quit();
+});
 
 // ---------------------------------------------------------------------------
 // ドラッグ移動
@@ -562,6 +745,38 @@ ipcMain.on('window:fit-height', (_event, requested) => {
 
 ipcMain.on('window:click-through', (_event, enabled) => {
   win?.setIgnoreMouseEvents(Boolean(enabled), { forward: true });
+});
+
+// 画像をドロップされたあと、すぐ話しかけられるよう入力欄に文字を打てる状態にする
+ipcMain.on('window:focus', () => {
+  win?.focus();
+});
+
+// ---------------------------------------------------------------------------
+// ドロップされた画像を小さくする（中身は image-compress.js）
+// ---------------------------------------------------------------------------
+// 置き場所はいつもデスクトップ。テストのときは MASCOT_OUTPUT_DIR で差し替えられる
+function compressOutputDir() {
+  return process.env.MASCOT_OUTPUT_DIR ? path.resolve(process.env.MASCOT_OUTPUT_DIR) : app.getPath('desktop');
+}
+
+ipcMain.handle('image:compress', async (event, paths, text) => {
+  const command = parseCompressCommand(text);
+  if (!command || command.kind === 'cancel') return { status: command ? 'cancel' : 'unknown' };
+
+  const files = (Array.isArray(paths) ? paths : []).filter((file) => typeof file === 'string' && file);
+  const sender = event.sender;
+  const result = await compressImages({
+    paths: files,
+    command,
+    outDir: compressOutputDir(),
+    nativeImage,
+    onProgress: (index, total) => {
+      if (sender.isDestroyed()) return;
+      sender.send('image:progress', total > 1 ? `${total}枚のうち${index}枚目を処理中…` : '画像を処理中…');
+    },
+  });
+  return { status: 'done', text: describeResult(result, command) };
 });
 
 // ---------------------------------------------------------------------------
@@ -635,6 +850,16 @@ const CHAT_FUNCTIONS = {
   ],
   call: (functionCall) => (functionCall.name === 'search_history' ? searchHistory(functionCall.args) : callReminderFunction(functionCall)),
 };
+
+/** 今回の会話で渡す道具。カレンダー連携が ON のときだけ、カレンダーの道具も足す */
+function chatFunctions() {
+  if (!calendarActive()) return CHAT_FUNCTIONS;
+  return {
+    declarations: [...CHAT_FUNCTIONS.declarations, ...CALENDAR_FUNCTION_DECLARATIONS],
+    call: (functionCall) =>
+      CALENDAR_FUNCTION_NAMES.has(functionCall.name) ? callCalendarFunction(functionCall) : CHAT_FUNCTIONS.call(functionCall),
+  };
+}
 
 /** 保管庫と直近の履歴から、昔の会話を探す。見つかった発言だけを Gemini に返す */
 async function searchHistory({ keywords, from, to } = {}) {
@@ -718,6 +943,7 @@ function checkReminders() {
     // PC を切っていた・スリープしていたなどで遅れたときは、いつの分かを添える
     dueNotices.push(item.late ? `（${formatMessageTime(item.at)} の分。時間が過ぎちゃってた）\n${message}` : message);
   }
+  checkCalendar();
   deliverReminders();
 }
 
@@ -727,6 +953,203 @@ function deliverReminders() {
   if (!win.isVisible()) showMascot();
   win.webContents.send('reminder:due', dueNotices.join('\n\n'));
   dueNotices = [];
+}
+
+// ---------------------------------------------------------------------------
+// Google カレンダー連携（中身は calendar.js、ログインは google-auth.js）
+// ---------------------------------------------------------------------------
+// ・会話で「明日の予定は？」「金曜15時に歯医者を入れて」→ Gemini がカレンダーの道具を呼ぶ
+// ・予定の10分前に、リマインダーと同じ吹き出しと音で知らせる
+// ・その日はじめて（朝5時より後に）豆を起動したとき、今日の予定をまとめて言う。昼からの起動なら、これからの予定だけ
+//   （起動したままで日が変わっても言わない。起動したときにカレンダー連携が OFF なら、その日は言わない）
+const EVENT_NOTICE_LEAD_MS = 10 * 60 * 1000;
+// 予定を読み直す間隔（ほかの所で予定を足したり動かしたりしても、この間隔で気づく）。
+// 直前に足された予定は10分前のお知らせに間に合わないこともあるが、タイマーほどの正確さは要らないので長めにする
+const CALENDAR_REFRESH_MS = 15 * 60 * 1000;
+// うまく読めなかったときに、もう一度試すまでの時間
+const CALENDAR_RETRY_MS = 60 * 1000;
+// 日付が変わっても、朝5時までは前の日の続きとして、まとめは言わない
+const BRIEFING_HOUR_START = 5;
+
+const CALENDAR_FUNCTION_DECLARATIONS = [
+  {
+    name: 'list_calendar_events',
+    description: 'ユーザーの Google カレンダーの予定を、期間を指定して読む。「今日の予定は？」「来週なにがある？」など',
+    parameters: {
+      type: 'object',
+      properties: {
+        from: { type: 'string', description: '期間のはじめの日。YYYY-MM-DD' },
+        to: { type: 'string', description: '期間の終わりの日（この日も含む）。YYYY-MM-DD。1日だけなら from と同じ日' },
+      },
+      required: ['from', 'to'],
+    },
+  },
+  {
+    name: 'add_calendar_event',
+    description: 'ユーザーの Google カレンダーに予定を足す。「金曜の15時に歯医者を入れて」「カレンダーに登録して」など',
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: '予定の名前（例: 歯医者）' },
+        start: {
+          type: 'string',
+          description: '始まり。時間のある予定はタイムゾーン付きの ISO 8601（例: 2026-09-25T15:00:00+09:00）、終日の予定は YYYY-MM-DD',
+        },
+        end: { type: 'string', description: '終わり（省略すると1時間、終日なら1日）。形は start と同じ' },
+        all_day: { type: 'boolean', description: '終日の予定なら true' },
+        location: { type: 'string', description: '場所（あれば）' },
+      },
+      required: ['title', 'start'],
+    },
+  },
+];
+const CALENDAR_FUNCTION_NAMES = new Set(CALENDAR_FUNCTION_DECLARATIONS.map((declaration) => declaration.name));
+
+/** カレンダー連携を使うか（設定で ON、かつ Google にログインしている） */
+function calendarActive() {
+  return settings.calendarEnabled && Boolean(googleAuth.account);
+}
+
+function setCalendarEnabled(enabled) {
+  settings = { ...settings, calendarEnabled: enabled };
+  saveSettings(settingsFile, settings);
+  resetCalendarCache();
+  notifySettingsChanged();
+}
+
+function calendarPromptLines() {
+  if (!calendarActive()) {
+    return ['', 'ユーザーの Google カレンダーとはつながっていません。予定を聞かれたら、右クリックメニューの「設定を開く」でカレンダー連携をつなげられると伝えてください。'];
+  }
+  return [
+    '',
+    'ユーザーの Google カレンダーとつながっています。',
+    '予定を聞かれたら list_calendar_events で調べてから答え、予定を入れてと頼まれたら add_calendar_event で足してください。',
+    '「〇〇って教えて」「〇分たったら知らせて」のように知らせてほしいだけのときは、カレンダーではなくタイマーやリマインダーを使ってください。',
+    '道具を使わずに、予定を調べた・足したと言ってはいけません。「明日」「来週の金曜」などは、現在の日時をもとに日付に直してください。',
+    'カレンダーの予定は、始まる10分前に吹き出しで知らせます。',
+  ];
+}
+
+/** Gemini が呼んだカレンダーの道具を実行する */
+async function callCalendarFunction({ name, args = {} }) {
+  try {
+    if (name === 'list_calendar_events') {
+      const from = parseDay(args.from);
+      const to = parseDay(args.to, true);
+      if (from == null || to == null || to < from) return { ok: false, error: 'from と to は YYYY-MM-DD で、from が先になるように指定してください' };
+      const events = await calendar.listEvents(from, Math.min(to + 1, from + 62 * DAY_MS));
+      return { ok: true, count: events.length, events: events.map((event) => describeEvent(event, { withDay: true })) };
+    }
+    const event = await calendar.addEvent({
+      title: args.title,
+      start: args.start,
+      end: args.end,
+      allDay: Boolean(args.all_day),
+      location: args.location,
+    });
+    resetCalendarCache();
+    return { ok: true, added: describeEvent(event, { withDay: true }) };
+  } catch (err) {
+    if (err instanceof RangeError) return { ok: false, error: err.message };
+    if (err instanceof GoogleAuthError && err.kind === 'signed-out') {
+      notifySettingsChanged();
+      return { ok: false, error: 'Google のログインが切れています。設定画面からログインし直すよう伝えてください' };
+    }
+    if (err instanceof CalendarError || err instanceof GoogleAuthError) return { ok: false, error: err.message };
+    throw err;
+  }
+}
+
+// 次の24時間の予定（10分前に知らせるため）と、もう知らせた予定の目印。
+// 予定を読んだときの一覧をもとに、1秒ごとの確認は PC の中だけで行う（そのたびに Google へは行かない）
+let upcomingEvents = [];
+const notifiedEvents = new Set();
+let nextCalendarCheckAt = 0;
+let calendarChecking = false;
+let signedOutNoticeShown = false;
+// 朝のまとめは、起動した時刻で決める。予定を読めたら（ネットにつながったら）1回だけ言う
+const launchedAt = Date.now();
+let briefingPending = true;
+
+function resetCalendarCache() {
+  upcomingEvents = [];
+  nextCalendarCheckAt = 0;
+}
+
+function loadCalendarState() {
+  try {
+    return JSON.parse(fs.readFileSync(calendarStateFile, 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+function saveCalendarState(state) {
+  try {
+    fs.mkdirSync(path.dirname(calendarStateFile), { recursive: true });
+    fs.writeFileSync(calendarStateFile, JSON.stringify(state, null, 2), 'utf8');
+  } catch (err) {
+    console.error('[calendar] 朝のまとめを言った日を保存できませんでした:', err.message);
+  }
+}
+
+/** 1秒ごとに呼ばれる。10分前になった予定を知らせ、ときどき予定を読み直す */
+function checkCalendar() {
+  if (!calendarActive()) {
+    briefingPending = false;
+    return;
+  }
+  const now = Date.now();
+  for (const event of dueEventNotices(upcomingEvents, now, EVENT_NOTICE_LEAD_MS, notifiedEvents)) {
+    notifiedEvents.add(noticeKey(event));
+    dueNotices.push(eventNoticeText(event, now));
+  }
+  if (calendarChecking || now < nextCalendarCheckAt) return;
+
+  calendarChecking = true;
+  refreshCalendar(now)
+    .then(() => {
+      nextCalendarCheckAt = Date.now() + CALENDAR_REFRESH_MS;
+    })
+    .catch((err) => {
+      nextCalendarCheckAt = Date.now() + CALENDAR_RETRY_MS;
+      console.warn('[calendar] 予定を読めませんでした:', err.message);
+      // ログインが切れた・カレンダーを許可していないときは、1回だけ吹き出しで知らせる
+      const notice =
+        err instanceof GoogleAuthError && err.kind === 'signed-out'
+          ? 'Google のログインが切れちゃったみたい。右クリックの「設定を開く」からログインし直してね。'
+          : err.noScope
+            ? 'カレンダーを見る許可がもらえていないみたい。「設定を開く」の「アカウントを切り替える」でログインし直して、Google の画面でカレンダーにチェックを入れてね。'
+            : null;
+      if (notice) {
+        notifySettingsChanged();
+        if (!signedOutNoticeShown) {
+          signedOutNoticeShown = true;
+          dueNotices.push(notice);
+          deliverReminders();
+        }
+      }
+    })
+    .finally(() => {
+      calendarChecking = false;
+    });
+}
+
+async function refreshCalendar(now) {
+  upcomingEvents = await calendar.listEvents(now, now + DAY_MS);
+  signedOutNoticeShown = false;
+
+  if (!briefingPending) return;
+  const state = loadCalendarState();
+  // 起動したのと同じ日のうちに予定を読めたときだけ言う（前の晩に起動して、つながらないまま朝になったときは言わない）
+  const sameDay = localDateKey(now) === localDateKey(launchedAt);
+  if (sameDay && shouldBrief(state.lastBriefingDate, launchedAt, BRIEFING_HOUR_START)) {
+    dueNotices.push(briefingText(await calendar.listToday(now), now));
+    saveCalendarState({ ...state, lastBriefingDate: localDateKey(now) });
+    deliverReminders();
+  }
+  briefingPending = false;
 }
 
 // ---------------------------------------------------------------------------
@@ -756,7 +1179,7 @@ async function chat(userText, onDelta) {
   try {
     const { text, sources, searchSuggestions } = await askGemini(buildContents(store.messages, userText), {
       onDelta,
-      functions: CHAT_FUNCTIONS,
+      functions: chatFunctions(),
     });
     // 返事を表示するのに保存の完了は待たない（失敗しても store 側でログに出す）
     store.append(

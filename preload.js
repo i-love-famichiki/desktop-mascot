@@ -1,6 +1,6 @@
 'use strict';
 
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 // レンダラーに渡すのはこの関数だけ。APIキーも会話履歴もメイン側に閉じ込める。
 contextBridge.exposeInMainWorld('mascot', {
@@ -27,6 +27,16 @@ contextBridge.exposeInMainWorld('mascot', {
     const listener = (_event, text) => callback(text);
     ipcRenderer.on('reminder:due', listener);
     return () => ipcRenderer.removeListener('reminder:due', listener);
+  },
+  focusWindow: () => ipcRenderer.send('window:focus'),
+  // ドロップされたファイルの場所。File から場所を取り出せるのはここ（preload）だけ。
+  // FileList はここを通すと並びとして使えなくなるので、1つずつ渡してもらう
+  pathForFile: (file) => webUtils.getPathForFile(file),
+  compressImages: (paths, text) => ipcRenderer.invoke('image:compress', paths, text),
+  onCompressProgress: (callback) => {
+    const listener = (_event, text) => callback(text);
+    ipcRenderer.on('image:progress', listener);
+    return () => ipcRenderer.removeListener('image:progress', listener);
   },
   onShowHistory: (callback) => {
     const listener = () => callback();
