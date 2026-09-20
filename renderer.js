@@ -452,9 +452,20 @@ let typeTimer = null;
 let onTypingDone = null;
 
 window.mascot.onDelta((delta) => {
+  // 返事が出はじめたところで鳴らす（打ち終わりではなく話しはじめ）
+  playReplySound();
   pendingChars.push(...delta);
   if (!typeTimer) typeTimer = setInterval(typeStep, TYPE_INTERVAL_MS);
 });
+
+// 1回の返事で1度だけ鳴らす。ask() が話しかけるたびに待ち受けに戻す
+let replySoundPending = false;
+
+function playReplySound() {
+  if (!replySoundPending) return;
+  replySoundPending = false;
+  playSound(sounds.reply, sounds.volume);
+}
 
 function typeStep() {
   if (pendingChars.length === 0) {
@@ -491,6 +502,7 @@ function resetTyping() {
 
 async function ask(text) {
   busy = true;
+  replySoundPending = true;
   resetTyping();
   clearTimeout(hideTimer);
   bubbleTextEl.textContent = '';
@@ -509,7 +521,8 @@ async function ask(text) {
     if (result.ok) await waitTyping();
     resetTyping();
     say(result.text, { keep: true, sources: result.sources ?? [], searchSuggestions: result.searchSuggestions });
-    playSound(sounds.reply, sounds.volume);
+    // 1文字も流れてこなかったとき（エラーの文など）は、ここで鳴らす
+    playReplySound();
   } finally {
     busy = false;
     mascotEl.classList.remove('talking');
