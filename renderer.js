@@ -3,6 +3,7 @@
 const mascotEl = document.getElementById('mascot');
 const mascotImgEl = document.getElementById('mascot-img');
 const fallbackEl = document.getElementById('mascot-fallback');
+const lookEls = [...document.querySelectorAll('.mascot-svg')];
 const bubbleEl = document.getElementById('bubble');
 const bubbleTextEl = document.getElementById('bubble-text');
 const inputRowEl = document.getElementById('input-row');
@@ -355,8 +356,17 @@ function isSolid(target) {
   if (!(target instanceof Element)) return false;
   if (target.closest('#bubble, #input-row, #mascot-img')) return true;
   // SVG は描かれた図形の上だけ。枠の四角い余白は透明なので素通りさせる
-  return target instanceof SVGElement && target.id !== 'mascot-svg';
+  return target instanceof SVGElement && !(target instanceof SVGSVGElement);
 }
+
+// 豆の見た目。絵は4つとも index.html にあり、選ばれたものだけを出す
+function applyLook(id) {
+  const found = lookEls.some((el) => el.dataset.look === id);
+  for (const el of lookEls) el.classList.toggle('on', el.dataset.look === (found ? id : 'smooth'));
+}
+
+window.mascot.getLook().then(applyLook).catch(() => applyLook('smooth'));
+window.mascot.onLookChanged(applyLook);
 
 window.addEventListener('mousemove', (event) => {
   // ドラッグ中に切り替えると mouseup を取りこぼすので触らない
@@ -499,6 +509,7 @@ async function ask(text) {
     if (result.ok) await waitTyping();
     resetTyping();
     say(result.text, { keep: true, sources: result.sources ?? [], searchSuggestions: result.searchSuggestions });
+    playSound(sounds.reply, sounds.volume);
   } finally {
     busy = false;
     mascotEl.classList.remove('talking');
@@ -585,44 +596,23 @@ function showReminders() {
   say(pendingReminders.join('\n\n'), { keep: true });
   pendingReminders = [];
   startBounce();
-  playChime();
+  playSound(sounds.notify, sounds.volume);
 }
 
-// 「ポロン♪」を2回。音のファイルは使わず、その場で音を作る（高い音 → さらに高い音）
-const CHIME_NOTES = [1047, 1568]; // ド、ソ（Hz）
-const CHIME_NOTE_GAP_S = 0.12;
-const CHIME_REPEAT_GAP_S = 0.6;
-const CHIME_VOLUME = 0.25;
-let audioContext = null;
+// 鳴らす音は設定で選べる（sounds.js / sound-player.js）。中身はメイン側から受け取り、
+// 設定が変わったら受け取り直す
+let sounds = { notify: null, reply: null, volume: null };
 
-function playChime() {
+async function loadSounds() {
   try {
-    audioContext ??= new AudioContext();
-    const start = audioContext.currentTime + 0.05;
-    for (let repeat = 0; repeat < 2; repeat++) {
-      CHIME_NOTES.forEach((frequency, index) => {
-        playNote(frequency, start + repeat * CHIME_REPEAT_GAP_S + index * CHIME_NOTE_GAP_S);
-      });
-    }
+    sounds = await window.mascot.getSounds();
   } catch (err) {
-    // 音が出せなくても、吹き出しとはねるのは続ける
-    console.warn('[reminder] 音を鳴らせませんでした:', err.message);
+    console.warn('[sound] 音の設定を読めませんでした:', err.message);
   }
 }
 
-function playNote(frequency, at) {
-  const oscillator = audioContext.createOscillator();
-  const gain = audioContext.createGain();
-  oscillator.type = 'sine';
-  oscillator.frequency.value = frequency;
-  // すっと鳴って、鈴のように消えていく
-  gain.gain.setValueAtTime(0, at);
-  gain.gain.linearRampToValueAtTime(CHIME_VOLUME, at + 0.01);
-  gain.gain.exponentialRampToValueAtTime(0.001, at + 0.5);
-  oscillator.connect(gain).connect(audioContext.destination);
-  oscillator.start(at);
-  oscillator.stop(at + 0.5);
-}
+loadSounds();
+window.mascot.onSoundsChanged(loadSounds);
 
 function startBounce() {
   stopRoll();

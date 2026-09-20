@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   Calendar,
+  CalendarError,
   normalizeEvent,
   describeEvent,
   dueEventNotices,
@@ -12,6 +13,7 @@ const {
   shouldBrief,
   briefingText,
   eventTimes,
+  sameLengthEnd,
 } = require('../calendar');
 
 // この PC の時刻での日時（テストはどのタイムゾーンでも通るよう、ローカル時刻で作る）
@@ -124,4 +126,74 @@ test('カレンダーの読み書き（Google への送り方）', async () => {
   assert.equal(added.title, '誕生日');
   assert.deepEqual(JSON.parse(calls[1].options.body), { summary: '誕生日', start: { date: '2026-09-25' }, end: { date: '2026-09-26' } });
   await assert.rejects(calendar.addEvent({ title: ' ', start: '2026-09-25', allDay: true }), RangeError);
+});
+
+test('終わりを省いて時間を変えたら、同じ長さのまま動かす', () => {
+  const current = timed('e1', '歯医者', at(2026, 9, 25, 15), 90);
+  const moved = sameLengthEnd(current, new Date(at(2026, 9, 26, 10)).toISOString(), false);
+  assert.equal(Date.parse(moved) - at(2026, 9, 26, 10), 90 * 60000);
+  // 終日 → 時間のある予定は、ふつうの長さ（1時間）にする
+  const allDay = { ...current, allDay: true, start: at(2026, 9, 25), end: at(2026, 9, 26) };
+  assert.equal(Date.parse(sameLengthEnd(allDay, new Date(at(2026, 9, 26, 10)).toISOString(), false)) - at(2026, 9, 26, 10), 60 * 60000);
+  // 2日の終日の予定は、動かしても2日のまま（終わりの日は最後の日）
+  const twoDays = { ...current, allDay: true, start: at(2026, 9, 25), end: at(2026, 9, 27) };
+  assert.equal(sameLengthEnd(twoDays, '2026-10-01', true), '2026-10-02');
+  assert.throws(() => sameLengthEnd(current, 'あした', false), RangeError);
+});
+
+test('予定を直す（渡したところだけ変え、時間は今と同じ長さのまま動かす）', async () => {
+  const calls = [];
+  const fetch = async (url, options = {}) => {
+    calls.push({ url: String(url), options });
+    if (options.method === 'PATCH') return { ok: true, json: async () => ({ id: 'a', summary: '歯医者', ...JSON.parse(options.body) }) };
+    // GET（今の予定）
+    return {
+      ok: true,
+      json: async () => ({
+        id: 'a',
+        summary: '歯医者',
+        start: { dateTime: new Date(at(2026, 9, 25, 15)).toISOString() },
+        end: { dateTime: new Date(at(2026, 9, 25, 16, 30)).toISOString() },
+      }),
+    };
+  };
+  const calendar = new Calendar({ auth: { getAccessToken: async () => 'token-1' }, fetch });
+
+  // 名前と場所だけ変えるときは、今の予定を読みに行かない
+  await calendar.updateEvent({ id: 'a', title: '歯医者（変更）', location: '駅前' });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].options.method, 'PATCH');
+  assert.deepEqual(JSON.parse(calls[0].options.body), { summary: '歯医者（変更）', location: '駅前' });
+
+  // 始まりだけ変えたら、1時間半のまま動く
+  calls.length = 0;
+  await calendar.updateEvent({ id: 'a', start: new Date(at(2026, 9, 26, 10)).toISOString() });
+  const body = JSON.parse(calls[1].options.body);
+  assert.equal(Date.parse(body.end.dateTime) - Date.parse(body.start.dateTime), 90 * 60000);
+
+  await assert.rejects(calendar.updateEvent({ id: 'a', end: '2026-09-26' }), RangeError);
+  await assert.rejects(calendar.updateEvent({ id: 'a' }), RangeError);
+  await assert.rejects(calendar.updateEvent({ id: ' ' }), RangeError);
+});
+
+test('予定を消す。もう無い予定は、分かる言葉で断る', async () => {
+  const calls = [];
+  const calendar = new Calendar({
+    auth: { getAccessToken: async () => 'token-1' },
+    fetch: async (url, options = {}) => {
+      calls.push({ url: String(url), options });
+      // 消したあとの本文は空（204）
+      return { ok: true, status: 204, json: async () => { throw new Error('空'); } };
+    },
+  });
+  await calendar.deleteEvent('a b');
+  assert.equal(calls[0].options.method, 'DELETE');
+  assert.ok(calls[0].url.endsWith('/a%20b'));
+  await assert.rejects(calendar.deleteEvent(''), RangeError);
+
+  const gone = new Calendar({
+    auth: { getAccessToken: async () => 'token-1' },
+    fetch: async () => ({ ok: false, status: 410, json: async () => ({ error: { message: 'deleted' } }) }),
+  });
+  await assert.rejects(gone.deleteEvent('a'), (err) => err instanceof CalendarError && err.notFound === true);
 });

@@ -37,33 +37,190 @@
           hidden
         />
         <div id="mascot-fallback">
-          <svg id="mascot-svg" viewBox="0 0 200 160" role="img" aria-label="枝豆のマスコット">
-            <defs>
-              <!-- 左上から光が当たって見えるよう、明るい中心を左上に寄せる -->
-              <radialGradient id="beanGrad" cx="0.38" cy="0.32" r="0.75">
-                <stop offset="0" stop-color="#c9ef8a" />
-                <stop offset="0.5" stop-color="#8fd14f" />
-                <stop offset="1" stop-color="#5aa832" />
-              </radialGradient>
-            </defs>
-
-            <!-- 接地した影。豆の底に触れる高さに置き、浮いて見えないようにする -->
-            <ellipse class="ground" cx="104" cy="141" rx="70" ry="9" />
-
-            <!-- 転がるときに回す外側の入れ物（影は回さない） -->
+          <svg class="mascot-svg" data-look="smooth" viewBox="0 0 200 160" role="img" aria-label="枝豆のマスコット">
+          <defs>
+            <!-- 左上から光が当たって見えるよう、明るい中心を左上に寄せる -->
+            <radialGradient id="beanGrad" cx="0.38" cy="0.32" r="0.75">
+              <stop offset="0" stop-color="#c9ef8a" />
+              <stop offset="0.5" stop-color="#8fd14f" />
+              <stop offset="1" stop-color="#5aa832" />
+            </radialGradient>
+          </defs>
+          
+          <!-- 接地した影。豆の底に触れる高さに置き、浮いて見えないようにする -->
+          <ellipse class="ground" cx="104" cy="141" rx="70" ry="9" />
+          
+          <!-- 転がるときに回す外側の入れ物（影は回さない） -->
+          <g class="roller">
+          <!-- 豆1粒（少しだけ傾ける）。下側を少しへこませたそら豆形 -->
+          <g transform="rotate(-10 100 80)">
+            <path
+              class="bean"
+              d="M30 80 C26 40 70 18 110 22 C156 26 182 52 178 88 C174 122 140 138 104 132 C88 129 80 118 66 120 C44 124 32 108 30 80 Z"
+            />
+            <!-- へそ（豆がさやについていた跡） -->
+            <path class="hilum" d="M78 116 Q92 125 108 124" />
+            <!-- つや -->
+            <ellipse class="gloss" cx="76" cy="50" rx="24" ry="11" transform="rotate(-18 76 50)" />
+            <ellipse class="gloss small" cx="150" cy="60" rx="6" ry="4" />
+          </g>
+          </g>
+                    </svg>
+          <svg class="mascot-svg" data-look="pixel-coarse" viewBox="0 10 120 90" shape-rendering="crispEdges" role="img" aria-label="枝豆のマスコット">
+            <rect class="ground" x="20" y="80" width="80" height="10" />
+            <rect class="ground dim" x="40" y="90" width="40" height="10" />
             <g class="roller">
-            <!-- 豆1粒（少しだけ傾ける）。下側を少しへこませたそら豆形 -->
-            <g transform="rotate(-10 100 80)">
-              <path
-                class="bean"
-                d="M30 80 C26 40 70 18 110 22 C156 26 182 52 178 88 C174 122 140 138 104 132 C88 129 80 118 66 120 C44 124 32 108 30 80 Z"
-              />
-              <!-- へそ（豆がさやについていた跡） -->
-              <path class="hilum" d="M78 116 Q92 125 108 124" />
-              <!-- つや -->
-              <ellipse class="gloss" cx="76" cy="50" rx="24" ry="11" transform="rotate(-18 76 50)" />
-              <ellipse class="gloss small" cx="150" cy="60" rx="6" ry="4" />
+              <rect x="20" y="10" width="70" height="10" fill="#2c5214" />
+              <rect x="10" y="20" width="10" height="10" fill="#2c5214" />
+              <rect x="20" y="20" width="40" height="10" fill="#d7f59a" />
+              <rect x="60" y="20" width="30" height="10" fill="#a9e05e" />
+              <rect x="90" y="20" width="20" height="10" fill="#2c5214" />
+              <rect x="10" y="30" width="10" height="10" fill="#2c5214" />
+              <rect x="20" y="30" width="40" height="10" fill="#d7f59a" />
+              <rect x="60" y="30" width="30" height="10" fill="#a9e05e" />
+              <rect x="90" y="30" width="10" height="10" fill="#74bc3c" />
+              <rect x="100" y="30" width="10" height="10" fill="#2c5214" />
+              <rect x="0" y="40" width="10" height="10" fill="#2c5214" />
+              <rect x="10" y="40" width="20" height="10" fill="#a9e05e" />
+              <rect x="30" y="40" width="20" height="10" fill="#d7f59a" />
+              <rect x="50" y="40" width="30" height="10" fill="#a9e05e" />
+              <rect x="80" y="40" width="20" height="10" fill="#74bc3c" />
+              <rect x="100" y="40" width="10" height="10" fill="#4b8a27" />
+              <rect x="110" y="40" width="10" height="10" fill="#2c5214" />
+              <rect x="0" y="50" width="10" height="10" fill="#2c5214" />
+              <rect x="10" y="50" width="60" height="10" fill="#a9e05e" />
+              <rect x="70" y="50" width="30" height="10" fill="#74bc3c" />
+              <rect x="100" y="50" width="10" height="10" fill="#4b8a27" />
+              <rect x="110" y="50" width="10" height="10" fill="#2c5214" />
+              <rect x="10" y="60" width="10" height="10" fill="#2c5214" />
+              <rect x="20" y="60" width="70" height="10" fill="#74bc3c" />
+              <rect x="90" y="60" width="10" height="10" fill="#4b8a27" />
+              <rect x="100" y="60" width="10" height="10" fill="#2c5214" />
+              <rect x="10" y="70" width="30" height="10" fill="#2c5214" />
+              <rect x="40" y="70" width="30" height="10" fill="#74bc3c" />
+              <rect x="70" y="70" width="30" height="10" fill="#4b8a27" />
+              <rect x="100" y="70" width="10" height="10" fill="#2c5214" />
+              <rect x="40" y="80" width="60" height="10" fill="#2c5214" />
             </g>
+          </svg>
+          <svg class="mascot-svg" data-look="pixel-normal" viewBox="0 10 160 120" shape-rendering="crispEdges" role="img" aria-label="枝豆のマスコット">
+            <rect class="ground" x="20" y="110" width="120" height="10" />
+            <rect class="ground dim" x="40" y="120" width="80" height="10" />
+            <g class="roller">
+              <rect x="40" y="10" width="80" height="10" fill="#2c5214" />
+              <rect x="20" y="20" width="20" height="10" fill="#2c5214" />
+              <rect x="40" y="20" width="40" height="10" fill="#d7f59a" />
+              <rect x="80" y="20" width="30" height="10" fill="#a9e05e" />
+              <rect x="110" y="20" width="10" height="10" fill="#74bc3c" />
+              <rect x="120" y="20" width="10" height="10" fill="#2c5214" />
+              <rect x="20" y="30" width="10" height="10" fill="#2c5214" />
+              <rect x="30" y="30" width="60" height="10" fill="#d7f59a" />
+              <rect x="90" y="30" width="30" height="10" fill="#a9e05e" />
+              <rect x="120" y="30" width="10" height="10" fill="#74bc3c" />
+              <rect x="130" y="30" width="10" height="10" fill="#2c5214" />
+              <rect x="10" y="40" width="10" height="10" fill="#2c5214" />
+              <rect x="20" y="40" width="10" height="10" fill="#a9e05e" />
+              <rect x="30" y="40" width="60" height="10" fill="#d7f59a" />
+              <rect x="90" y="40" width="30" height="10" fill="#a9e05e" />
+              <rect x="120" y="40" width="20" height="10" fill="#74bc3c" />
+              <rect x="140" y="40" width="10" height="10" fill="#2c5214" />
+              <rect x="10" y="50" width="10" height="10" fill="#2c5214" />
+              <rect x="20" y="50" width="20" height="10" fill="#a9e05e" />
+              <rect x="40" y="50" width="40" height="10" fill="#d7f59a" />
+              <rect x="80" y="50" width="30" height="10" fill="#a9e05e" />
+              <rect x="110" y="50" width="30" height="10" fill="#74bc3c" />
+              <rect x="140" y="50" width="10" height="10" fill="#2c5214" />
+              <rect x="0" y="60" width="10" height="10" fill="#2c5214" />
+              <rect x="10" y="60" width="90" height="10" fill="#a9e05e" />
+              <rect x="100" y="60" width="40" height="10" fill="#74bc3c" />
+              <rect x="140" y="60" width="10" height="10" fill="#4b8a27" />
+              <rect x="150" y="60" width="10" height="10" fill="#2c5214" />
+              <rect x="10" y="70" width="10" height="10" fill="#2c5214" />
+              <rect x="20" y="70" width="70" height="10" fill="#a9e05e" />
+              <rect x="90" y="70" width="40" height="10" fill="#74bc3c" />
+              <rect x="130" y="70" width="10" height="10" fill="#4b8a27" />
+              <rect x="140" y="70" width="10" height="10" fill="#2c5214" />
+              <rect x="10" y="80" width="10" height="10" fill="#2c5214" />
+              <rect x="20" y="80" width="100" height="10" fill="#74bc3c" />
+              <rect x="120" y="80" width="20" height="10" fill="#4b8a27" />
+              <rect x="140" y="80" width="10" height="10" fill="#2c5214" />
+              <rect x="20" y="90" width="20" height="10" fill="#2c5214" />
+              <rect x="40" y="90" width="60" height="10" fill="#74bc3c" />
+              <rect x="100" y="90" width="30" height="10" fill="#4b8a27" />
+              <rect x="130" y="90" width="10" height="10" fill="#2c5214" />
+              <rect x="40" y="100" width="10" height="10" fill="#2c5214" />
+              <rect x="50" y="100" width="40" height="10" fill="#3f7a1f" />
+              <rect x="90" y="100" width="30" height="10" fill="#4b8a27" />
+              <rect x="120" y="100" width="20" height="10" fill="#2c5214" />
+              <rect x="50" y="110" width="70" height="10" fill="#2c5214" />
+            </g>
+          </svg>
+          <svg class="mascot-svg" data-look="pixel-fine" viewBox="0 10 200 150" shape-rendering="crispEdges" role="img" aria-label="枝豆のマスコット">
+            <rect class="ground" x="20" y="140" width="160" height="10" />
+            <rect class="ground dim" x="40" y="150" width="120" height="10" />
+            <g class="roller">
+              <rect x="60" y="10" width="80" height="10" fill="#2c5214" />
+              <rect x="40" y="20" width="20" height="10" fill="#2c5214" />
+              <rect x="60" y="20" width="30" height="10" fill="#d7f59a" />
+              <rect x="90" y="20" width="50" height="10" fill="#a9e05e" />
+              <rect x="140" y="20" width="20" height="10" fill="#2c5214" />
+              <rect x="30" y="30" width="10" height="10" fill="#2c5214" />
+              <rect x="40" y="30" width="60" height="10" fill="#d7f59a" />
+              <rect x="100" y="30" width="40" height="10" fill="#a9e05e" />
+              <rect x="140" y="30" width="20" height="10" fill="#74bc3c" />
+              <rect x="160" y="30" width="10" height="10" fill="#2c5214" />
+              <rect x="20" y="40" width="10" height="10" fill="#2c5214" />
+              <rect x="30" y="40" width="10" height="10" fill="#a9e05e" />
+              <rect x="40" y="40" width="70" height="10" fill="#d7f59a" />
+              <rect x="110" y="40" width="30" height="10" fill="#a9e05e" />
+              <rect x="140" y="40" width="30" height="10" fill="#74bc3c" />
+              <rect x="170" y="40" width="10" height="10" fill="#2c5214" />
+              <rect x="10" y="50" width="10" height="10" fill="#2c5214" />
+              <rect x="20" y="50" width="20" height="10" fill="#a9e05e" />
+              <rect x="40" y="50" width="70" height="10" fill="#d7f59a" />
+              <rect x="110" y="50" width="30" height="10" fill="#a9e05e" />
+              <rect x="140" y="50" width="40" height="10" fill="#74bc3c" />
+              <rect x="180" y="50" width="10" height="10" fill="#2c5214" />
+              <rect x="10" y="60" width="10" height="10" fill="#2c5214" />
+              <rect x="20" y="60" width="20" height="10" fill="#a9e05e" />
+              <rect x="40" y="60" width="60" height="10" fill="#d7f59a" />
+              <rect x="100" y="60" width="40" height="10" fill="#a9e05e" />
+              <rect x="140" y="60" width="40" height="10" fill="#74bc3c" />
+              <rect x="180" y="60" width="10" height="10" fill="#2c5214" />
+              <rect x="10" y="70" width="10" height="10" fill="#2c5214" />
+              <rect x="20" y="70" width="40" height="10" fill="#a9e05e" />
+              <rect x="60" y="70" width="20" height="10" fill="#d7f59a" />
+              <rect x="80" y="70" width="60" height="10" fill="#a9e05e" />
+              <rect x="140" y="70" width="30" height="10" fill="#74bc3c" />
+              <rect x="170" y="70" width="10" height="10" fill="#4b8a27" />
+              <rect x="180" y="70" width="10" height="10" fill="#2c5214" />
+              <rect x="10" y="80" width="10" height="10" fill="#2c5214" />
+              <rect x="20" y="80" width="110" height="10" fill="#a9e05e" />
+              <rect x="130" y="80" width="40" height="10" fill="#74bc3c" />
+              <rect x="170" y="80" width="10" height="10" fill="#4b8a27" />
+              <rect x="180" y="80" width="10" height="10" fill="#2c5214" />
+              <rect x="10" y="90" width="10" height="10" fill="#2c5214" />
+              <rect x="20" y="90" width="10" height="10" fill="#74bc3c" />
+              <rect x="30" y="90" width="80" height="10" fill="#a9e05e" />
+              <rect x="110" y="90" width="50" height="10" fill="#74bc3c" />
+              <rect x="160" y="90" width="20" height="10" fill="#4b8a27" />
+              <rect x="180" y="90" width="10" height="10" fill="#2c5214" />
+              <rect x="10" y="100" width="10" height="10" fill="#2c5214" />
+              <rect x="20" y="100" width="130" height="10" fill="#74bc3c" />
+              <rect x="150" y="100" width="30" height="10" fill="#4b8a27" />
+              <rect x="180" y="100" width="10" height="10" fill="#2c5214" />
+              <rect x="20" y="110" width="20" height="10" fill="#2c5214" />
+              <rect x="40" y="110" width="90" height="10" fill="#74bc3c" />
+              <rect x="130" y="110" width="40" height="10" fill="#4b8a27" />
+              <rect x="170" y="110" width="10" height="10" fill="#2c5214" />
+              <rect x="40" y="120" width="20" height="10" fill="#2c5214" />
+              <rect x="60" y="120" width="50" height="10" fill="#3f7a1f" />
+              <rect x="110" y="120" width="50" height="10" fill="#4b8a27" />
+              <rect x="160" y="120" width="10" height="10" fill="#2c5214" />
+              <rect x="60" y="130" width="10" height="10" fill="#2c5214" />
+              <rect x="70" y="130" width="70" height="10" fill="#4b8a27" />
+              <rect x="140" y="130" width="20" height="10" fill="#2c5214" />
+              <rect x="70" y="140" width="70" height="10" fill="#2c5214" />
             </g>
           </svg>
         </div>
@@ -81,6 +238,7 @@
       </div>
     </div>
 
+    <script src="sound-player.js"></script>
     <script src="renderer.js"></script>
   </body>
 </html>

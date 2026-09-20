@@ -6,7 +6,8 @@ const path = require('path');
 const { HistoryStore } = require('./history-store');
 const { searchConversations, mergeMessages, parseDay } = require('./archive-store');
 const { ReminderStore } = require('./reminder-store');
-const { loadSettings, saveSettings } = require('./settings');
+const { loadSettings, saveSettings, CALENDAR_REFRESH_CHOICES, MASCOT_LOOKS } = require('./settings');
+const { soundChoices, SOUND_VOLUMES, AUDIO_EXTENSIONS, SoundError, importSoundFile, playable, volumeById } = require('./sounds');
 const { createSseParser } = require('./sse');
 const { parseCompressCommand, compressImages, describeResult } = require('./image-compress');
 const { GoogleAuth, GoogleAuthError } = require('./google-auth');
@@ -195,6 +196,9 @@ const reminders = new ReminderStore(
 // Google へのログインとカレンダー。ログイン情報はほかの PC と分けたいので、共有中でもこの PC の中に置く。
 // テストのときは MASCOT_GOOGLE_DIR で置き場所を差し替えられる
 const googleDir = process.env.MASCOT_GOOGLE_DIR ? path.resolve(process.env.MASCOT_GOOGLE_DIR) : dataDir;
+
+// 「自分の音」に選ばれたファイルのコピーを置く所（お知らせ用と返事用で分ける）
+const soundsDir = path.join(dataDir, 'sounds');
 const googleAuth = new GoogleAuth({
   clientFile: path.join(googleDir, 'google-client.json'),
   tokenFile: path.join(googleDir, 'google-token.json'),
@@ -523,6 +527,16 @@ function settingsState() {
       hasClient: googleAuth.hasClient(),
       email: googleAuth.email,
       signingIn: Boolean(googleAuth.signingIn),
+      refreshMinutes: settings.calendarRefreshMinutes,
+      refreshChoices: [...CALENDAR_REFRESH_CHOICES],
+    },
+    look: { id: settings.mascotLook, choices: [...MASCOT_LOOKS] },
+    sound: {
+      choices: soundChoices(),
+      volume: settings.soundVolume,
+      volumeChoices: SOUND_VOLUMES.map(({ id, name }) => ({ id, name })),
+      notify: { id: settings.notifySound, fileName: soundFileName('notify') },
+      reply: { id: settings.replySound, fileName: soundFileName('reply') },
     },
   };
 }
@@ -611,6 +625,97 @@ ipcMain.handle('settings:calendar-sign-out', async (event) => {
 ipcMain.handle('settings:set-calendar-enabled', (event, enabled) => {
   // ログインしていないときは ON にできない
   if (fromSettingsWindow(event)) setCalendarEnabled(Boolean(enabled) && Boolean(googleAuth.account));
+  return settingsState();
+});
+
+ipcMain.handle('settings:set-calendar-refresh', (event, minutes) => {
+  // 画面にある選択肢以外は受け取らない
+  if (fromSettingsWindow(event) && CALENDAR_REFRESH_CHOICES.includes(Number(minutes))) {
+    settings = { ...settings, calendarRefreshMinutes: Number(minutes) };
+    saveSettings(settingsFile, settings);
+    // 次の読み直しを待たず、新しい間隔ですぐ読み直す
+    resetCalendarCache();
+    notifySettingsChanged();
+  }
+  return settingsState();
+});
+
+// ---------------------------------------------------------------------------
+// 音（お知らせの音と、返事が出たときの音）
+// ---------------------------------------------------------------------------
+// 内蔵の音はレンダラーがその場で作る。「自分の音」は、選ばれたファイルをアプリの中に
+// コピーしておき、その中身をレンダラーへ渡して鳴らす（sounds.js / sound-player.js）
+const SOUND_SLOTS = { notify: 'お知らせの音', reply: '返事の音' };
+
+/** その音のコピーがあれば、その名前（設定の画面に出す） */
+function soundFileName(slot) {
+  const file = settings[`${slot}SoundFile`];
+  return file ? path.basename(file) : '';
+}
+
+/** レンダラーに渡す、今鳴らすもの */
+function soundState() {
+  return {
+    notify: playable(settings.notifySound, settings.notifySoundFile),
+    reply: playable(settings.replySound, settings.replySoundFile),
+    volume: volumeById(settings.soundVolume),
+  };
+}
+
+function saveSoundSettings(next) {
+  settings = { ...settings, ...next };
+  saveSettings(settingsFile, settings);
+  // 次に鳴らすときから新しい音になるよう、豆の窓にも伝える
+  if (win && !win.isDestroyed()) win.webContents.send('sound:changed');
+  notifySettingsChanged();
+}
+
+// 豆の窓と設定の窓（試し聞き）の両方が使う
+ipcMain.handle('sound:get', () => soundState());
+
+ipcMain.handle('settings:set-sound', (event, slot, id) => {
+  if (fromSettingsWindow(event) && SOUND_SLOTS[slot] && soundChoices().some((choice) => choice.id === id)) {
+    saveSoundSettings({ [`${slot}Sound`]: id });
+  }
+  return settingsState();
+});
+
+// 豆の見た目。絵は index.html に4つとも置いてあるので、名前を渡すだけでよい
+ipcMain.handle('look:get', () => settings.mascotLook);
+
+ipcMain.handle('settings:set-mascot-look', (event, id) => {
+  if (fromSettingsWindow(event) && MASCOT_LOOKS.some((look) => look.id === id)) {
+    settings = { ...settings, mascotLook: id };
+    saveSettings(settingsFile, settings);
+    if (win && !win.isDestroyed()) win.webContents.send('look:changed', id);
+    notifySettingsChanged();
+  }
+  return settingsState();
+});
+
+ipcMain.handle('settings:set-sound-volume', (event, id) => {
+  if (fromSettingsWindow(event) && SOUND_VOLUMES.some((volume) => volume.id === id)) saveSoundSettings({ soundVolume: id });
+  return settingsState();
+});
+
+// 「自分の音」に使うファイルを選ぶ
+ipcMain.handle('settings:choose-sound-file', async (event, slot) => {
+  if (!fromSettingsWindow(event) || !SOUND_SLOTS[slot]) return settingsState();
+  const { canceled, filePaths } = await dialog.showOpenDialog(settingsWin, {
+    title: `${SOUND_SLOTS[slot]}に使うファイルを選ぶ`,
+    buttonLabel: 'この音を使う',
+    defaultPath: app.getPath('music'),
+    filters: [{ name: '音のファイル', extensions: AUDIO_EXTENSIONS.map((ext) => ext.slice(1)) }],
+    properties: ['openFile'],
+  });
+  if (canceled || !filePaths[0]) return settingsState();
+  try {
+    // 選ばれたらそのまま「自分の音」に切り替える
+    saveSoundSettings({ [`${slot}SoundFile`]: importSoundFile(path.join(soundsDir, slot), filePaths[0]), [`${slot}Sound`]: 'custom' });
+  } catch (err) {
+    if (!(err instanceof SoundError)) throw err;
+    await showDialog({ type: 'error', title: '音を使えませんでした', message: 'この音のファイルは使えませんでした。', detail: err.message });
+  }
   return settingsState();
 });
 
@@ -963,9 +1068,12 @@ function deliverReminders() {
 // ・その日はじめて（朝5時より後に）豆を起動したとき、今日の予定をまとめて言う。昼からの起動なら、これからの予定だけ
 //   （起動したままで日が変わっても言わない。起動したときにカレンダー連携が OFF なら、その日は言わない）
 const EVENT_NOTICE_LEAD_MS = 10 * 60 * 1000;
-// 予定を読み直す間隔（ほかの所で予定を足したり動かしたりしても、この間隔で気づく）。
-// 直前に足された予定は10分前のお知らせに間に合わないこともあるが、タイマーほどの正確さは要らないので長めにする
-const CALENDAR_REFRESH_MS = 15 * 60 * 1000;
+// 予定を読み直す間隔は設定で変えられる（settings.calendarRefreshMinutes）。
+// 直前に足された予定は10分前のお知らせに間に合わないこともあるが、タイマーほどの正確さは要らないので長めでよい
+function calendarRefreshMs() {
+  return settings.calendarRefreshMinutes * 60 * 1000;
+}
+
 // うまく読めなかったときに、もう一度試すまでの時間
 const CALENDAR_RETRY_MS = 60 * 1000;
 // 日付が変わっても、朝5時までは前の日の続きとして、まとめは言わない
@@ -1002,6 +1110,35 @@ const CALENDAR_FUNCTION_DECLARATIONS = [
       required: ['title', 'start'],
     },
   },
+  {
+    name: 'update_calendar_event',
+    description: 'ユーザーの Google カレンダーにある予定を直す。「歯医者を3時にずらして」「場所を変えて」など。先に list_calendar_events で番号を調べる',
+    parameters: {
+      type: 'object',
+      properties: {
+        id: { type: 'integer', description: '直す予定の番号（list_calendar_events が返した番号）' },
+        title: { type: 'string', description: '新しい名前（変えるときだけ）' },
+        start: {
+          type: 'string',
+          description: '新しい始まり（時間を変えるときは必ず指定）。時間のある予定はタイムゾーン付きの ISO 8601、終日の予定は YYYY-MM-DD',
+        },
+        end: { type: 'string', description: '新しい終わり（省略すると、今と同じ長さのまま動かす）。形は start と同じ' },
+        all_day: { type: 'boolean', description: '終日の予定に変えるなら true' },
+        location: { type: 'string', description: '新しい場所（変えるときだけ。空にすると場所を消す）' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'delete_calendar_event',
+    description:
+      'ユーザーの Google カレンダーから予定を消す。「歯医者の予定を消して」など。先に list_calendar_events で番号を調べ、どの予定を消すかユーザーに確かめてから呼ぶ',
+    parameters: {
+      type: 'object',
+      properties: { id: { type: 'integer', description: '消す予定の番号（list_calendar_events が返した番号）' } },
+      required: ['id'],
+    },
+  },
 ];
 const CALENDAR_FUNCTION_NAMES = new Set(CALENDAR_FUNCTION_DECLARATIONS.map((declaration) => declaration.name));
 
@@ -1025,10 +1162,47 @@ function calendarPromptLines() {
     '',
     'ユーザーの Google カレンダーとつながっています。',
     '予定を聞かれたら list_calendar_events で調べてから答え、予定を入れてと頼まれたら add_calendar_event で足してください。',
+    '予定を直す・消すときは、先に list_calendar_events でその予定の番号を調べてから update_calendar_event / delete_calendar_event を呼んでください。',
+    '消すのは取り消せないので、delete_calendar_event を呼ぶ前に「どの予定を消すか」を必ずユーザーに確かめてください。同じ名前の予定が2つ以上あるときも、どれか確かめてください。',
     '「〇〇って教えて」「〇分たったら知らせて」のように知らせてほしいだけのときは、カレンダーではなくタイマーやリマインダーを使ってください。',
     '道具を使わずに、予定を調べた・足したと言ってはいけません。「明日」「来週の金曜」などは、現在の日時をもとに日付に直してください。',
     'カレンダーの予定は、始まる10分前に吹き出しで知らせます。',
+    `ほかの所（スマホなど）で変えた予定に気づくまで、最大${settings.calendarRefreshMinutes}分かかります。`,
   ];
+}
+
+// 予定は Google の長い ID ではなく、タイマーと同じ「番号」でやりとりする。
+// list_calendar_events で見せた予定にだけ番号を配るので、番号を取り違えて別の予定を消すことがない
+const eventIdsByNumber = new Map();
+const eventNumbersById = new Map();
+let nextEventNumber = 1;
+// 覚えておく予定の数（古いものから忘れる）
+const EVENT_NUMBER_MAX = 200;
+
+/** その予定の番号（はじめての予定には新しい番号を配る） */
+function eventNumber(id) {
+  const known = eventNumbersById.get(id);
+  if (known) return known;
+  const number = nextEventNumber++;
+  eventIdsByNumber.set(number, id);
+  eventNumbersById.set(id, number);
+  while (eventIdsByNumber.size > EVENT_NUMBER_MAX) {
+    const oldest = eventIdsByNumber.keys().next().value;
+    eventNumbersById.delete(eventIdsByNumber.get(oldest));
+    eventIdsByNumber.delete(oldest);
+  }
+  return number;
+}
+
+/** 番号から Google の予定 ID。まだ見せていない番号なら null */
+function eventIdFromNumber(number) {
+  return eventIdsByNumber.get(Number(number)) ?? null;
+}
+
+function forgetEventNumber(number) {
+  const id = eventIdsByNumber.get(Number(number));
+  if (id) eventNumbersById.delete(id);
+  eventIdsByNumber.delete(Number(number));
 }
 
 /** Gemini が呼んだカレンダーの道具を実行する */
@@ -1039,7 +1213,31 @@ async function callCalendarFunction({ name, args = {} }) {
       const to = parseDay(args.to, true);
       if (from == null || to == null || to < from) return { ok: false, error: 'from と to は YYYY-MM-DD で、from が先になるように指定してください' };
       const events = await calendar.listEvents(from, Math.min(to + 1, from + 62 * DAY_MS));
-      return { ok: true, count: events.length, events: events.map((event) => describeEvent(event, { withDay: true })) };
+      return {
+        ok: true,
+        count: events.length,
+        events: events.map((event) => ({ id: eventNumber(event.id), event: describeEvent(event, { withDay: true }) })),
+      };
+    }
+    if (name === 'update_calendar_event' || name === 'delete_calendar_event') {
+      const eventId = eventIdFromNumber(args.id);
+      if (!eventId) return { ok: false, error: 'その番号の予定が分かりません。先に list_calendar_events で予定を調べ直してください' };
+      if (name === 'delete_calendar_event') {
+        await calendar.deleteEvent(eventId);
+        forgetEventNumber(args.id);
+        resetCalendarCache();
+        return { ok: true, deleted: true };
+      }
+      const updated = await calendar.updateEvent({
+        id: eventId,
+        ...(args.title !== undefined && { title: args.title }),
+        ...(args.start !== undefined && { start: args.start }),
+        ...(args.end !== undefined && { end: args.end }),
+        ...(args.all_day !== undefined && { allDay: Boolean(args.all_day) }),
+        ...(args.location !== undefined && { location: args.location }),
+      });
+      resetCalendarCache();
+      return { ok: true, updated: updated ? describeEvent(updated, { withDay: true }) : '直しました' };
     }
     const event = await calendar.addEvent({
       title: args.title,
@@ -1110,7 +1308,7 @@ function checkCalendar() {
   calendarChecking = true;
   refreshCalendar(now)
     .then(() => {
-      nextCalendarCheckAt = Date.now() + CALENDAR_REFRESH_MS;
+      nextCalendarCheckAt = Date.now() + calendarRefreshMs();
     })
     .catch((err) => {
       nextCalendarCheckAt = Date.now() + CALENDAR_RETRY_MS;

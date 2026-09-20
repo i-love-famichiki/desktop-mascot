@@ -12,6 +12,13 @@ contextBridge.exposeInMainWorld('settingsApi', {
   signInCalendar: () => ipcRenderer.invoke('settings:calendar-sign-in'),
   signOutCalendar: () => ipcRenderer.invoke('settings:calendar-sign-out'),
   setCalendarEnabled: (enabled) => ipcRenderer.invoke('settings:set-calendar-enabled', enabled),
+  setCalendarRefreshMinutes: (minutes) => ipcRenderer.invoke('settings:set-calendar-refresh', minutes),
+  setMascotLook: (id) => ipcRenderer.invoke('settings:set-mascot-look', id),
+  setSound: (slot, id) => ipcRenderer.invoke('settings:set-sound', slot, id),
+  setSoundVolume: (id) => ipcRenderer.invoke('settings:set-sound-volume', id),
+  chooseSoundFile: (slot) => ipcRenderer.invoke('settings:choose-sound-file', slot),
+  // 試し聞き用。豆の窓と同じものを鳴らす
+  getSounds: () => ipcRenderer.invoke('sound:get'),
   // トレイなどほかの所で設定が変わったときも、表示を合わせる
   onChanged: (callback) => {
     const listener = (_event, state) => callback(state);

@@ -134,6 +134,22 @@ function eventTimes({ start, end, allDay }) {
   };
 }
 
+/** 終わりを省いて時間だけ変えたときの、新しい終わり（今の予定と同じ長さのまま動かす） */
+function sameLengthEnd(current, start, allDay) {
+  if (allDay) {
+    const day = parseDateKey(String(start).slice(0, 10));
+    if (!day) throw new RangeError('終日の予定の日付は YYYY-MM-DD で指定してください');
+    // 時間のある予定を終日に変えるときは1日にする
+    const days = current.allDay ? Math.max(1, Math.round((current.end - current.start) / DAY_MS)) : 1;
+    return localDateKey(new Date(day.getFullYear(), day.getMonth(), day.getDate() + days - 1));
+  }
+  const startMs = Date.parse(start);
+  if (!Number.isFinite(startMs)) throw new RangeError('始まりの日時が読み取れませんでした。タイムゾーン付きの ISO 8601 で指定してください');
+  // 終日の予定を時間のある予定に変えるときは、ふつうの長さにする
+  const span = !current.allDay && current.end > current.start ? current.end - current.start : DEFAULT_EVENT_MINUTES * 60000;
+  return new Date(startMs + span).toISOString();
+}
+
 class Calendar {
   /** @param {{ auth: { getAccessToken(): Promise<string> }, fetch: typeof fetch }} options */
   constructor({ auth, fetch }) {
@@ -161,6 +177,12 @@ class Calendar {
       error.noScope = true;
       throw error;
     }
+    // 消えた予定・番号の取り違え
+    if (res.status === 404 || res.status === 410) {
+      const error = new CalendarError('その予定は見つかりませんでした。もう消えているかもしれないので、予定を調べ直してください');
+      error.notFound = true;
+      throw error;
+    }
     if (!res.ok) throw new CalendarError(`カレンダーの操作に失敗しました: ${res.status} ${message}`);
     return data;
   }
@@ -184,6 +206,47 @@ class Calendar {
     const start = new Date(now);
     start.setHours(0, 0, 0, 0);
     return this.listEvents(start, start.getTime() + DAY_MS);
+  }
+
+  /** 予定を1つ読む */
+  async getEvent(id) {
+    const eventId = String(id ?? '').trim();
+    if (!eventId) throw new RangeError('どの予定かが分かりません');
+    return normalizeEvent(await this.#request(`${API}/${encodeURIComponent(eventId)}`));
+  }
+
+  /**
+   * 予定を直す。渡したところだけ変える。
+   * 時間を変えるときは始まりも渡してもらい、終わりを省いたら今と同じ長さのまま動かす
+   */
+  async updateEvent({ id, title, start, end, allDay, location, description } = {}) {
+    const eventId = String(id ?? '').trim();
+    if (!eventId) throw new RangeError('どの予定かが分かりません');
+    const body = {};
+    if (title !== undefined) {
+      const summary = String(title).trim();
+      if (!summary) throw new RangeError('予定の名前が空です');
+      body.summary = summary;
+    }
+    if (location !== undefined) body.location = String(location);
+    if (description !== undefined) body.description = String(description);
+    if (start !== undefined || end !== undefined || allDay !== undefined) {
+      if (start === undefined) throw new RangeError('時間を変えるときは、始まりの日時も指定してください');
+      const current = await this.getEvent(eventId);
+      if (!current) throw new CalendarError('その予定は読み取れませんでした');
+      const allDayNext = allDay === undefined ? current.allDay : Boolean(allDay);
+      const endNext = end === undefined || end === null || end === '' ? sameLengthEnd(current, start, allDayNext) : end;
+      Object.assign(body, eventTimes({ start, end: endNext, allDay: allDayNext }));
+    }
+    if (Object.keys(body).length === 0) throw new RangeError('変えるところが指定されていません');
+    return normalizeEvent(await this.#request(`${API}/${encodeURIComponent(eventId)}`, { method: 'PATCH', body: JSON.stringify(body) }));
+  }
+
+  /** 予定を消す */
+  async deleteEvent(id) {
+    const eventId = String(id ?? '').trim();
+    if (!eventId) throw new RangeError('どの予定かが分かりません');
+    await this.#request(`${API}/${encodeURIComponent(eventId)}`, { method: 'DELETE' });
   }
 
   /** 予定を足す。足した予定を返す */
@@ -213,4 +276,5 @@ module.exports = {
   shouldBrief,
   briefingText,
   eventTimes,
+  sameLengthEnd,
 };

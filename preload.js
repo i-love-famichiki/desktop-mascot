@@ -23,6 +23,20 @@ contextBridge.exposeInMainWorld('mascot', {
   showMenu: () => ipcRenderer.send('menu:show'),
   openLink: (url) => ipcRenderer.send('link:open', url),
   getHistory: () => ipcRenderer.invoke('chat:history'),
+  // 豆の見た目（index.html に置いてある絵の名前）
+  getLook: () => ipcRenderer.invoke('look:get'),
+  onLookChanged: (callback) => {
+    const listener = (_event, id) => callback(id);
+    ipcRenderer.on('look:changed', listener);
+    return () => ipcRenderer.removeListener('look:changed', listener);
+  },
+  // 鳴らす音（内蔵の音の楽譜か、選ばれた音のファイルの中身）
+  getSounds: () => ipcRenderer.invoke('sound:get'),
+  onSoundsChanged: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on('sound:changed', listener);
+    return () => ipcRenderer.removeListener('sound:changed', listener);
+  },
   onReminder: (callback) => {
     const listener = (_event, text) => callback(text);
     ipcRenderer.on('reminder:due', listener);

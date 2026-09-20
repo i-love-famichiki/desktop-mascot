@@ -234,19 +234,29 @@ body {
   cursor: grabbing;
 }
 
-#mascot-svg {
-  display: block;
+/* 見た目は設定で選べる。4種類とも置いておき、選ばれたものだけ出す */
+.mascot-svg {
+  display: none;
   width: 100%;
   height: auto;
   overflow: visible;
 }
 
-#mascot-svg .ground {
+.mascot-svg.on {
+  display: block;
+}
+
+.mascot-svg .ground {
   fill: rgba(0, 0, 0, 0.28);
 }
 
-/* 豆 */
-#mascot-svg .bean {
+/* 8ビット風の影の2段目（ぼかさず四角で置くので、薄い段を足して丸く見せる） */
+.mascot-svg .ground.dim {
+  fill: rgba(0, 0, 0, 0.14);
+}
+
+/* なめらかな豆（8ビット風の絵は、色を index.html に直に書いてある） */
+.mascot-svg .bean {
   fill: url(#beanGrad);
   stroke: #3d6b1f;
   /* 表示は 1/5 ほどに縮むので、線は太めに描いておく */
@@ -255,23 +265,23 @@ body {
 }
 
 /* へそ（さやについていた跡） */
-#mascot-svg .hilum {
+.mascot-svg .hilum {
   fill: none;
   stroke: rgba(61, 107, 31, 0.6);
   stroke-width: 8;
   stroke-linecap: round;
 }
 
-#mascot-svg .gloss {
+.mascot-svg .gloss {
   fill: rgba(255, 255, 255, 0.45);
 }
 
-#mascot-svg .gloss.small {
+.mascot-svg .gloss.small {
   fill: rgba(255, 255, 255, 0.3);
 }
 
 /* 地面に転がっているので浮かせない。喋っている間だけ、転がった豆がゆらゆら揺れる */
-#mascot.talking #mascot-svg,
+#mascot.talking .mascot-svg,
 #mascot.has-image.talking #mascot-img {
   transform-origin: 50% 90%;
   animation: rock 0.6s ease-in-out infinite;
