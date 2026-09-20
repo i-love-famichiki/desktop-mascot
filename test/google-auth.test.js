@@ -184,3 +184,51 @@ test('クライアント ID のファイルを選ぶ前は、ログインでき�
   await assert.rejects(auth.signIn(), (err) => err.kind === 'no-client');
   await assert.rejects(auth.getAccessToken(), (err) => err.kind === 'signed-out');
 });
+
+test('クライアント ID は暗号化して保存する（生のままファイルに残さない）', () => {
+  const { dir, auth } = setup();
+  const clientFile = path.join(dir, 'google-client.json');
+  const saved = fs.readFileSync(clientFile, 'utf8');
+
+  assert.ok(!saved.includes('secret-xyz'), '秘密の値がそのまま残っている');
+  assert.ok(!saved.includes('id-123'), 'クライアント ID がそのまま残っている');
+  assert.ok(JSON.parse(saved).client.length > 0);
+  // 暗号化してあっても、読み直せば元に戻る
+  assert.deepEqual(auth.readClient(), { clientId: 'id-123.apps.googleusercontent.com', clientSecret: 'secret-xyz' });
+});
+
+test('前の版が平文で置いたファイルも読めて、読んだついでに暗号化に置き換わる', () => {
+  const { dir, auth } = setup();
+  const clientFile = path.join(dir, 'google-client.json');
+  // 1.0.12 より前の置き方に戻す
+  fs.writeFileSync(clientFile, CLIENT_JSON, 'utf8');
+
+  assert.deepEqual(auth.readClient(), { clientId: 'id-123.apps.googleusercontent.com', clientSecret: 'secret-xyz' });
+  assert.ok(!fs.readFileSync(clientFile, 'utf8').includes('secret-xyz'), '平文のまま残っている');
+  // 置き換えたあとも読める
+  assert.equal(auth.readClient().clientSecret, 'secret-xyz');
+});
+
+test('暗号化できない PC では平文で置く（読めなくなるよりよい）', () => {
+  const dir = tempDir();
+  const clientFile = path.join(dir, 'google-client.json');
+  const auth = new GoogleAuth({
+    clientFile,
+    tokenFile: path.join(dir, 't.json'),
+    fetch: async () => assert.fail('通信しない'),
+    openExternal: async () => assert.fail('ブラウザを開かない'),
+    safeStorage: { ...fakeSafeStorage, isEncryptionAvailable: () => false },
+  });
+  const source = path.join(dir, 'client_secret_download.json');
+  fs.writeFileSync(source, CLIENT_JSON);
+  auth.importClientFile(source);
+
+  assert.equal(fs.readFileSync(clientFile, 'utf8'), CLIENT_JSON);
+  assert.equal(auth.readClient().clientSecret, 'secret-xyz');
+});
+
+test('暗号化した中身が壊れていたら、選び直すよう伝える', () => {
+  const { dir, auth } = setup();
+  fs.writeFileSync(path.join(dir, 'google-client.json'), JSON.stringify({ client: 'こわれた値' }), 'utf8');
+  assert.throws(() => auth.readClient(), (err) => err instanceof GoogleAuthError && /選び直して/.test(err.message));
+});

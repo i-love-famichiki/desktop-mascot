@@ -180,18 +180,61 @@ class GoogleAuth {
   importClientFile(sourcePath) {
     const text = fs.readFileSync(sourcePath, 'utf8');
     parseClientFile(text);
+    this.#writeClient(text);
+  }
+
+  /**
+   * クライアント ID を保存する。長く使える鍵と同じく safeStorage で暗号化して置く。
+   * デスクトップ アプリの client_secret は仕組みの上でどのみち秘密にできない値だが、
+   * data フォルダを開いたときに、生のまま目に入らないようにしておく。
+   * 暗号化できない PC では、読めなくなるより平文で置くほうがよい
+   */
+  #writeClient(text) {
     fs.mkdirSync(path.dirname(this.clientFile), { recursive: true });
-    fs.writeFileSync(this.clientFile, text, 'utf8');
+    const body = this.safeStorage.isEncryptionAvailable()
+      ? JSON.stringify({ client: this.safeStorage.encryptString(text).toString('base64') }, null, 2)
+      : text;
+    const tmp = `${this.clientFile}.tmp`;
+    fs.writeFileSync(tmp, body, 'utf8');
+    fs.renameSync(tmp, this.clientFile);
   }
 
   readClient() {
-    let text;
+    let saved;
     try {
-      text = fs.readFileSync(this.clientFile, 'utf8');
+      saved = fs.readFileSync(this.clientFile, 'utf8');
     } catch {
       throw new GoogleAuthError('no-client', 'クライアント ID のファイルが選ばれていません');
     }
-    return parseClientFile(text);
+    const text = this.#decodeClient(saved);
+    const wasPlain = text === saved;
+    let client;
+    try {
+      client = parseClientFile(text);
+    } catch (err) {
+      // 平文ならファイルの中身がおかしい。暗号化してあったなら、鍵が変わった・壊れたということ
+      if (wasPlain) throw err;
+      throw new GoogleAuthError('bad-client', `クライアント ID を読めませんでした。設定画面で選び直してください（${err.message}）`);
+    }
+    // 前の版で平文のまま置かれたファイルは、読んだついでに暗号化して置き直す
+    if (wasPlain && this.safeStorage.isEncryptionAvailable()) this.#writeClient(text);
+    return client;
+  }
+
+  /** 暗号化して置いたものと、前の版の平文と、どちらも読めるようにする */
+  #decodeClient(saved) {
+    let box;
+    try {
+      box = JSON.parse(saved);
+    } catch {
+      return saved;
+    }
+    if (typeof box?.client !== 'string') return saved;
+    try {
+      return this.safeStorage.decryptString(Buffer.from(box.client, 'base64'));
+    } catch (err) {
+      throw new GoogleAuthError('bad-client', `クライアント ID を読めませんでした。設定画面で選び直してください（${err.message}）`);
+    }
   }
 
   get email() {
