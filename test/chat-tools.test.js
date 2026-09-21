@@ -49,6 +49,19 @@ test('カレンダーは、会話で使う設定のときだけ渡す', () => {
   }
 });
 
+test('数字だけのメモ書き（全角でも）で頼まれても、カレンダーを渡す', () => {
+  for (const t of ['１００１歓迎会１９００', '1001歓迎会1900', '９３０会議１０００', '10/1 19:00 飲み会', '3日に病院']) {
+    assert.equal(at(t, { calendarInChat: true }).calendar, true, t);
+  }
+});
+
+test('ひとつ前が予定の話なら、「入ってないよ」のような続きにもカレンダーを渡す', () => {
+  assert.equal(at('入ってないよ', { calendarInChat: true, previousText: '９３０会議１０００' }).calendar, true);
+  assert.equal(at('ほんと？', { calendarInChat: true, previousText: '明日の予定は？' }).calendar, true);
+  // 前が雑談なら渡さない
+  assert.equal(at('ほんと？', { calendarInChat: true, previousText: 'おなかすいた' }).calendar, false);
+});
+
 test('タイマーが登録されているときは、言葉が無くても渡す（取り消しや問い合わせに答えるため）', () => {
   assert.equal(at('こんばんは', { hasReminders: true }).timer, true);
   assert.equal(at('こんばんは', { hasReminders: false }).timer, false);
