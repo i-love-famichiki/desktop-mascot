@@ -71,6 +71,8 @@ const DEFAULT_SETTINGS = Object.freeze({
   // 口調のプリセット（5個）と、最後に使っていたものの番号。中身は tone.js
   tonePresetIndex: 0,
   tonePresets: DEFAULT_TONE_PRESETS,
+  // 最後に口調を変えた時刻。それより前の返事の口調を、まめにまねさせないために使う
+  toneChangedAt: 0,
 });
 
 /** 設定を読む。ファイルが無い・壊れている・知らない値は初期値で補う */

@@ -15,6 +15,7 @@ const tone = () => ({
   geminiModel: 'gemini-3.5-flash-lite',
   tonePresetIndex: 0,
   tonePresets: normalizeTonePresets(DEFAULT_TONE_PRESETS),
+  toneChangedAt: 0,
 });
 
 function tempFile() {

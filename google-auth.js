@@ -281,8 +281,10 @@ class GoogleAuth {
       this.account = { refreshToken: tokens.refresh_token, email: emailFromIdToken(tokens.id_token) };
       this.#keepAccessToken(tokens);
       this.#save();
-      // 切り替える前のアカウントの鍵は、もう使わないので取り消しておく
-      if (previous && previous.refreshToken !== tokens.refresh_token) this.#revoke(previous.refreshToken);
+      // 切り替える前のアカウントの鍵は、もう使わないので取り消しておく。
+      // 同じアカウントでログインし直したときは取り消さない。Google の取り消しはそのアカウントの許可ごと消すので、
+      // いまもらった鍵や、同じアカウントでログインしているほかの豆（exe と npm start など）の鍵まで使えなくなる
+      if (previous && previous.refreshToken !== tokens.refresh_token && previous.email !== this.email) this.#revoke(previous.refreshToken);
       return this.email;
     } finally {
       listener.close();

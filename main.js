@@ -109,11 +109,14 @@ function buildSystemPrompt(groups = { timer: true, history: true, calendar: cale
     // 口調のプリセットを使っているときは、ここで口調を決めない（決めると、下の【まめの口調設定】と
     // 引っぱり合って毒舌などが弱まる）。絵文字を使わないことだけは、どちらでも守らせる
     ...(usingTonePreset() ? ['絵文字は使いません。'] : ['口調は親しみやすく、少しだけ子どもっぽく、絵文字は使いません。']),
+    // 渡した会話の中の、前の返事の口調に引っぱられて、口調を切り替えても変わらなかったので言い添える
+    '下の会話にある、あなたの前の返事の口調はまねしないでください。口調を途中で変えることがあるので、いつも今ここに書いた口調で話してください。',
+    ...toneChangedPromptLines(),
     '返事は必ず日本語で、基本は2〜3文の短さに収めてください。画面の小さな吹き出しに表示されます。',
     // 道具の使い方は、その道具を渡す回にだけ書く（渡していない道具の話を書くと、
     // 持っていない道具を使ったつもりで返事をしてしまう）
     ...(groups.timer ? reminderPromptLines() : []),
-    ...(groups.calendar ? calendarPromptLines() : CALENDAR_OFF_LINES),
+    ...(groups.calendar ? calendarPromptLines() : calendarInChat() ? CALENDAR_IDLE_LINES : calendarUnavailableLines()),
     ...(groups.history
       ? [
           '',
@@ -790,6 +793,44 @@ function usingTonePreset() {
   return settings.tonePresetIndex !== PLAIN_TONE_PRESET_INDEX;
 }
 
+// 口調を変える前の会話を、メモとして渡すときの上限（文字数）
+const BEFORE_TONE_CHANGE_MAX_CHARS = 2000;
+// そのメモの中の、まめの返事1つあたりの上限。言い回しまで渡すと口調が移るので、中身が分かる程度に切る
+const BEFORE_TONE_CHANGE_REPLY_CHARS = 60;
+
+/** 今日、口調を変えた時刻。今日変えていなければ 0 */
+function toneChangedToday() {
+  const changedAt = settings.toneChangedAt;
+  return changedAt && changedAt >= new Date().setHours(0, 0, 0, 0) ? changedAt : 0;
+}
+
+/**
+ * 今日の会話の途中で口調を変えたときの、変える前の会話のメモ。
+ * 変える前の返事を会話として渡すと、何往復しても前の口調に引っぱられたので、
+ * 会話（contents）からは外し、中身だけをここで伝える（buildContents）
+ */
+function toneChangedPromptLines() {
+  const changedAt = toneChangedToday();
+  if (!changedAt) return [];
+  const before = store.messages
+    .filter((message) => message.at >= new Date().setHours(0, 0, 0, 0) && message.at < changedAt)
+    .slice(-HISTORY_MAX_TURNS * 2)
+    .map((message) =>
+      message.role === 'user'
+        ? `[${formatMessageTime(message.at)}] ユーザー: ${message.content}`
+        : `あなた: ${clip(message.content.replace(/\s+/g, ' '), BEFORE_TONE_CHANGE_REPLY_CHARS)}`,
+    );
+  if (before.length === 0) return [];
+  return [
+    '',
+    `[${formatMessageTime(changedAt)}] に口調を変えました。それより前の今日の会話は、下のメモだけです（あなたの返事は途中で切ってあります）。`,
+    '話の中身は覚えておいてください。ただし前の口調・言い回しは、まねしないでください。',
+    '---',
+    clip(before.join('\n'), BEFORE_TONE_CHANGE_MAX_CHARS),
+    '---',
+  ];
+}
+
 function saveTone(next) {
   settings = { ...settings, ...next };
   saveSettings(settingsFile, settings);
@@ -809,7 +850,9 @@ function tonePresetsWith(index, preset) {
 // 使うプリセットを切り替える（次に起動したときも、ここで選んだものに戻る）
 ipcMain.handle('settings:select-tone-preset', (event, index) => {
   const at = Number(index);
-  if (fromSettingsWindow(event) && isTonePresetIndex(at)) saveTone({ tonePresetIndex: at });
+  if (fromSettingsWindow(event) && isTonePresetIndex(at) && at !== settings.tonePresetIndex) {
+    saveTone({ tonePresetIndex: at, toneChangedAt: Date.now() });
+  }
   return settingsState();
 });
 
@@ -819,7 +862,11 @@ ipcMain.handle('settings:set-tone-axis', (event, index, axisId, value) => {
   const axis = TONE_AXES.find((item) => item.id === axisId);
   if (fromSettingsWindow(event) && isTonePresetIndex(at) && axis) {
     const preset = settings.tonePresets[at];
-    saveTone({ tonePresets: tonePresetsWith(at, { ...preset, axes: { ...preset.axes, [axis.id]: clampAxisValue(axis, value) } }) });
+    saveTone({
+      tonePresets: tonePresetsWith(at, { ...preset, axes: { ...preset.axes, [axis.id]: clampAxisValue(axis, value) } }),
+      // 今使っているプリセットのつまみを動かしたときも、口調が変わったことになる
+      ...(at === settings.tonePresetIndex && usingTonePreset() && { toneChangedAt: Date.now() }),
+    });
   }
   return settingsState();
 });
@@ -1042,12 +1089,17 @@ ipcMain.handle('image:compress', async (event, paths, text) => {
 // 知らせる文は登録のときに Gemini が決めておくので、知らせるときは Gemini を呼ばない
 const REMINDER_CHECK_INTERVAL_MS = 1000;
 
+// この時間より前の発言は、続きの話とは見なさない
+const FOLLOW_UP_MS = 10 * 60 * 1000;
+
 /** この発言で渡す道具の組み合わせ（中身は chat-tools.js） */
 function toolGroups(userText) {
+  const previous = store.messages.findLast((message) => message.role === 'user');
   return chatToolGroups(userText, {
     // 登録中のタイマーがあるときは、取り消しや問い合わせに答えられるよう必ず渡す
     hasReminders: reminders.items.length > 0,
     calendarInChat: calendarInChat(),
+    previousText: previous && Date.now() - previous.at < FOLLOW_UP_MS ? previous.content : '',
   });
 }
 
@@ -1327,16 +1379,44 @@ function setCalendarMode(mode) {
   notifySettingsChanged();
 }
 
-// カレンダーの道具を渡さない回に出す1行（つながっていない回も、予定の話が出ていない回も同じ）
-const CALENDAR_OFF_LINES = Object.freeze([
+// 会話で予定を読み書きできないときの、今の状態の一言。
+// 「つながっていません」だけだと、何を直せばよいか分からないので、どこが原因かをはっきり言わせる
+const CALENDAR_STATUS = Object.freeze({
+  noClient: 'カレンダー連携の準備（クライアント ID のファイル）がまだだから、予定は見られないよ。「設定を開く」のカレンダーのところから準備してね',
+  signedOut: 'Google のアカウントのログインが切れてるから、予定を見たり入れたり消したりできないよ。「設定を開く」からログインし直してね',
+  notSignedIn: 'Google のアカウントにまだログインしてないから、予定は見られないよ。「設定を開く」のカレンダーのところからログインしてね',
+  off: 'カレンダー連携が「使わない」の設定になってるから、予定は見られないよ。「設定を開く」で「会話でも予定を読み書きする」にしてね',
+  notifyOnly: '設定が「予定の通知だけ」になってるから、会話では予定を見たり入れたり消したりできないよ。「設定を開く」で「会話でも予定を読み書きする」にしてね',
+});
+
+/** 今の状態がどれか */
+function calendarStatus() {
+  if (!googleAuth.hasClient()) return CALENDAR_STATUS.noClient;
+  // 使う設定のままログインだけ無い＝ログインが切れた
+  if (!googleAuth.account) return settings.calendarMode === 'off' ? CALENDAR_STATUS.notSignedIn : CALENDAR_STATUS.signedOut;
+  if (settings.calendarMode === 'off') return CALENDAR_STATUS.off;
+  return CALENDAR_STATUS.notifyOnly;
+}
+
+/** 会話で予定を読み書きできないときに出す行 */
+function calendarUnavailableLines() {
+  return [
+    '',
+    '今は、ユーザーの Google カレンダーの予定を読み書きできません。',
+    `予定を聞かれたり、入れて・消してと頼まれたりしたら、ぼかさずに理由を「${calendarStatus()}」のように伝えてください。`,
+    '予定を調べた・入れた・消したとは言わないでください。',
+  ];
+}
+
+// つながっているが、予定の話が出ていないので道具を渡さない回に出す1行。
+// 「つながっていません」と言うと、つながっているのに設定を見直させてしまう
+const CALENDAR_IDLE_LINES = Object.freeze([
   '',
-  'ユーザーの Google カレンダーとはつながっていません。予定を聞かれたら、右クリックメニューの「設定を開く」でカレンダー連携をつなげられると伝えてください。',
+  'ユーザーの Google カレンダーとはつながっていますが、この回は予定を読み書きできません。予定を調べた・足したとは言わず、予定の話なら「〇日の〇時に〇〇を入れて」のように、もう一度言ってもらってください。',
 ]);
 
 function calendarPromptLines() {
-  if (!calendarInChat()) {
-    return [...CALENDAR_OFF_LINES];
-  }
+  if (!calendarInChat()) return calendarUnavailableLines();
   return [
     '',
     'ユーザーの Google カレンダーとつながっています。',
@@ -1345,6 +1425,9 @@ function calendarPromptLines() {
     '消すのは取り消せないので、delete_calendar_event を呼ぶ前に「どの予定を消すか」を必ずユーザーに確かめてください。同じ名前の予定が2つ以上あるときも、どれか確かめてください。',
     '「〇〇って教えて」「〇分たったら知らせて」のように知らせてほしいだけのときは、カレンダーではなくタイマーやリマインダーを使ってください。',
     '道具を使わずに、予定を調べた・足したと言ってはいけません。「明日」「来週の金曜」などは、現在の日時をもとに日付に直してください。',
+    '「1001歓迎会1900」のような数字だけのメモ書きは、先の4けたを日付（10月1日）、後の4けたを時刻（19:00）と読んでください。',
+    '「930会議1000」のように、日付（9月30日）とも時刻（9:30〜10:00）とも読めるときは、足す前にどちらかユーザーに確かめてください。',
+    '予定を足したり直したりしたら、返事では必ず「9月30日(水) 10:00」のように日付と時刻をはっきり言ってください。',
     'カレンダーの予定は、始まる10分前に吹き出しで知らせます。',
     `ほかの所（スマホなど）で変えた予定に気づくまで、最大${settings.calendarRefreshMinutes}分かかります。`,
   ];
@@ -1431,7 +1514,7 @@ async function callCalendarFunction({ name, args = {} }) {
     if (err instanceof RangeError) return { ok: false, error: err.message };
     if (err instanceof GoogleAuthError && err.kind === 'signed-out') {
       notifySettingsChanged();
-      return { ok: false, error: 'Google のログインが切れています。設定画面からログインし直すよう伝えてください' };
+      return { ok: false, error: `${CALENDAR_STATUS.signedOut}と、そのまま伝えてください` };
     }
     if (err instanceof CalendarError || err instanceof GoogleAuthError) return { ok: false, error: err.message };
     throw err;
@@ -1445,6 +1528,9 @@ const notifiedEvents = new Set();
 let nextCalendarCheckAt = 0;
 let calendarChecking = false;
 let signedOutNoticeShown = false;
+
+// Google のログインが切れたときの吹き出し
+const GOOGLE_SIGNED_OUT_NOTICE = 'Google のアカウントのログインが切れてるよ。右クリックの「設定を開く」から、ログインし直してね。';
 // 朝のまとめは、起動した時刻で決める。予定を読めたら（ネットにつながったら）1回だけ言う
 const launchedAt = Date.now();
 let briefingPending = true;
@@ -1495,7 +1581,7 @@ function checkCalendar() {
       // ログインが切れた・カレンダーを許可していないときは、1回だけ吹き出しで知らせる
       const notice =
         err instanceof GoogleAuthError && err.kind === 'signed-out'
-          ? 'Google のログインが切れちゃったみたい。右クリックの「設定を開く」からログインし直してね。'
+          ? GOOGLE_SIGNED_OUT_NOTICE
           : err.noScope
             ? 'カレンダーを見る許可がもらえていないみたい。「設定を開く」の「アカウントを切り替える」でログインし直して、Google の画面でカレンダーにチェックを入れてね。'
             : null;
@@ -1606,11 +1692,12 @@ async function summarizeDay(date, messages) {
 // ユーザーの発言にだけ、話した日時を先頭に付けて送る（保存している会話には付けない）。
 // まめの返事に付けると、まねして返事に日時を書き始めることがあるので付けない
 function buildContents(pastMessages, userText) {
-  const startOfToday = new Date().setHours(0, 0, 0, 0);
+  // 今日口調を変えていたら、それより前の会話は送らない（中身はシステムプロンプトのメモで渡す）
+  const since = Math.max(new Date().setHours(0, 0, 0, 0), toneChangedToday());
   const withTime = (text, at) => `[${formatMessageTime(at)}] ${text}`;
   return [
     ...pastMessages
-      .filter((message) => message.at >= startOfToday)
+      .filter((message) => message.at >= since)
       .slice(-HISTORY_MAX_TURNS * 2)
       .map((message) => ({
         role: message.role === 'user' ? 'user' : 'model',

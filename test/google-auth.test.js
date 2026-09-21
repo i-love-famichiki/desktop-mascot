@@ -171,6 +171,20 @@ test('アカウントを切り替えたら前の鍵を取り消す。ログア�
   assert.ok(!fs.existsSync(auth.tokenFile));
 });
 
+test('同じアカウントでログインし直したときは、前の鍵を取り消さない（許可ごと消えて、新しい鍵やほかの豆の鍵まで使えなくなるため）', async () => {
+  const { auth, google } = setup({
+    responses: (url) => {
+      if (url.includes('/revoke')) return { json: {} };
+      const n = google.calls.filter((call) => call.body?.grant_type === 'authorization_code').length;
+      return { json: { access_token: `a${n}`, expires_in: 3600, refresh_token: `r${n}`, id_token: idToken('me@gmail.com'), scope: GRANTED } };
+    },
+  });
+  await auth.signIn();
+  await auth.signIn();
+  assert.equal(google.calls.filter((call) => call.url.includes('/revoke')).length, 0);
+  assert.equal(auth.account.refreshToken, 'r2');
+});
+
 test('クライアント ID のファイルを選ぶ前は、ログインできない', async () => {
   const dir = tempDir();
   const auth = new GoogleAuth({
