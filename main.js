@@ -243,6 +243,10 @@ function createWindow() {
   // 透明な部分のクリックは後ろのアプリに渡す。マウスの動きだけは受け取り、
   // マスコットや吹き出しの上に来たらレンダラーが受け付けに切り替える
   win.setIgnoreMouseEvents(true, { forward: true });
+  // ※ 一時的: 画面側の [drag] の記録も端末に出す
+  win.webContents.on('console-message', (_event, _level, message) => {
+    if (String(message).startsWith('[drag]')) console.log('[renderer]', message);
+  });
   win.loadFile('index.html');
   // 起動する前や待ち時間中に時間が来ていたリマインダーは、読み込みが終わってから知らせる
   win.webContents.on('did-finish-load', deliverReminders);
@@ -807,24 +811,60 @@ app.on('window-all-closed', () => {
 // ---------------------------------------------------------------------------
 // ドラッグ移動
 // ---------------------------------------------------------------------------
-// カーソルの実座標で追従させる（DPI スケーリングでズレないようにするため）
+// カーソルの実座標で追従させる（DPI スケーリングでズレないようにするため）。
+// 掴んでいる間はこちらで一定の間隔でカーソルを見に行く。レンダラーの mousemove に任せると、
+// ウィンドウがカーソルについて動くぶん画面の中では止まって見え、mousemove が途切れて
+// 追従が遅れる（掴んでいるうちに豆がカーソルから離れていく）
+const DRAG_FOLLOW_MS = 16;
 let dragOffset = null;
+let dragTimer = null;
+
+let dbgTicks = 0;
+let dbgMoves = 0;
 
 ipcMain.on('drag:start', () => {
   if (!win) return;
   const cursor = screen.getCursorScreenPoint();
   const [wx, wy] = win.getPosition();
   dragOffset = { x: cursor.x - wx, y: cursor.y - wy };
+  dbgTicks = 0;
+  dbgMoves = 0;
+  console.log('[drag] start offset=', dragOffset, 'win=', wx, wy, 'cursor=', cursor.x, cursor.y);
 });
 
+// 「ここから本当に動かす」の合図。あとはこちらで追い続ける
 ipcMain.on('drag:move', () => {
-  if (!win || !dragOffset) return;
-  const cursor = screen.getCursorScreenPoint();
-  win.setPosition(cursor.x - dragOffset.x, cursor.y - dragOffset.y);
+  if (!win || !dragOffset || dragTimer) return;
+  console.log('[drag] move（追従を始める）');
+  followCursor();
+  dragTimer = setInterval(followCursor, DRAG_FOLLOW_MS);
 });
+
+function followCursor() {
+  if (!win || win.isDestroyed() || !dragOffset) {
+    stopFollowingCursor();
+    return;
+  }
+  const cursor = screen.getCursorScreenPoint();
+  const want = { x: cursor.x - dragOffset.x, y: cursor.y - dragOffset.y };
+  win.setPosition(want.x, want.y);
+  dbgTicks++;
+  // 10 回に1回だけ、狙った位置と実際の位置を出す
+  if (dbgTicks % 10 === 0) {
+    const [ax, ay] = win.getPosition();
+    console.log('[drag] tick', dbgTicks, 'cursor=', cursor.x, cursor.y, 'want=', want.x, want.y, 'actual=', ax, ay);
+  }
+}
+
+function stopFollowingCursor() {
+  clearInterval(dragTimer);
+  dragTimer = null;
+}
 
 ipcMain.on('drag:end', () => {
+  console.log('[drag] end ticks=', dbgTicks, 'moves=', dbgMoves);
   dragOffset = null;
+  stopFollowingCursor();
 });
 
 // ---------------------------------------------------------------------------

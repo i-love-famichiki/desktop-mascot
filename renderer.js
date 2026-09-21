@@ -318,6 +318,12 @@ mascotEl.addEventListener('mousedown', (event) => {
 
 window.addEventListener('mousemove', (event) => {
   if (!pointerDownAt) return;
+  // 画面の外などで離されて mouseup を取りこぼしたときは、ここで掴むのをやめる
+  if (event.buttons === 0) {
+    console.log('[drag] buttons=0 なので掴むのをやめた');
+    endDrag();
+    return;
+  }
   if (!dragging) {
     const moved =
       Math.abs(event.screenX - pointerDownAt.x) +
@@ -325,19 +331,27 @@ window.addEventListener('mousemove', (event) => {
     if (moved < DRAG_THRESHOLD) return;
     dragging = true;
   }
+  console.log('[drag] mousemove buttons=', event.buttons, 'dragging=', dragging);
   window.mascot.dragMove();
 });
 
 window.addEventListener('mouseup', () => {
-  if (!pointerDownAt) return;
+  // 動かさずに離したらクリック扱い＝話しかける
+  if (endDrag() === 'click') toggleInput();
+});
+
+// 掴むのをやめる。動かさずに離したときだけ 'click' を返す
+function endDrag() {
+  if (!pointerDownAt) return 'none';
   const wasDrag = dragging;
   pointerDownAt = null;
   dragging = false;
   window.mascot.dragEnd();
+  return wasDrag ? 'drag' : 'click';
+}
 
-  // 動かさずに離したらクリック扱い＝話しかける
-  if (!wasDrag) toggleInput();
-});
+// ほかのアプリへ切り替わったときも、掴んだままにしない
+window.addEventListener('blur', endDrag);
 
 // ---------------------------------------------------------------------------
 // 透明な部分のクリックを後ろのアプリに渡す
