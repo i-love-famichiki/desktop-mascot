@@ -25,23 +25,23 @@ function say(role, content, time) {
   return { role, content, at: time };
 }
 
-test('境目: 9/8 23:59 までは要約に回し、9/9 0:00 からは詳しいまま残す', async () => {
-  assert.equal(retentionCutoff(NOW), at(9, 9, 0, 0));
+test('境目: 9/13 23:59 までは要約に回し、9/14 0:00（昨日）からは詳しいまま残す', async () => {
+  assert.equal(retentionCutoff(NOW), at(9, 14, 0, 0));
 
   const store = new HistoryStore(tempFile());
   store.messages = [
-    say('user', '8日の夜の話', at(9, 8, 23, 59)),
-    say('user', '9日の朝の話', at(9, 9, 0, 0)),
+    say('user', '13日の夜の話', at(9, 13, 23, 59)),
+    say('user', '14日の朝の話', at(9, 14, 0, 0)),
   ];
   const calls = [];
   await store.compact(async (date, messages) => {
     calls.push([date, messages.map((m) => m.content)]);
-    return '8日のまとめ';
+    return '13日のまとめ';
   }, NOW);
 
-  assert.deepEqual(calls, [['2026-09-08', ['8日の夜の話']]]);
-  assert.deepEqual(store.messages.map((m) => m.content), ['9日の朝の話']);
-  assert.deepEqual(store.summaries.map((s) => [s.date, s.summary]), [['2026-09-08', '8日のまとめ']]);
+  assert.deepEqual(calls, [['2026-09-13', ['13日の夜の話']]]);
+  assert.deepEqual(store.messages.map((m) => m.content), ['14日の朝の話']);
+  assert.deepEqual(store.summaries.map((s) => [s.date, s.summary]), [['2026-09-13', '13日のまとめ']]);
 });
 
 test('古い会話は日ごとに要約され、ファイルに保存されて読み直せる', async () => {
@@ -181,13 +181,14 @@ test('昨日より前の会話: 今日の分は含めず、時刻の古い順に
   );
 });
 
-test('昨日より前の会話: 長い発言は300文字で切り、全体は新しいものから4000文字まで', () => {
+test('昨日より前の会話: 長い発言は300文字で切り、全体は新しいものから2000文字まで', () => {
   const store = new HistoryStore(tempFile());
   store.messages = Array.from({ length: 20 }, (_, i) => say('user', `${i}`.padEnd(500, 'あ'), at(9, 14, 10, i)));
   const past = store.pastDaysMessages(NOW);
-  assert.equal(past.length, 13);
+  // 301文字（300文字＋…）が6件で1806文字。7件目を足すと2000文字を超えるので入らない
+  assert.equal(past.length, 6);
   assert.ok(past.every((m) => m.content.length === 301 && m.content.endsWith('…')));
-  assert.ok(past[0].content.startsWith('7'));
+  assert.ok(past[0].content.startsWith('14'));
   assert.ok(past.at(-1).content.startsWith('19'));
   // 元の履歴は切られていない
   assert.equal(store.messages[19].content.length, 500);

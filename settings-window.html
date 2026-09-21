@@ -30,6 +30,30 @@
         font-size: 18px;
       }
 
+      /* 上のタブ。押すと下の .panel を切り替える */
+      .tabs {
+        display: flex;
+        gap: 4px;
+        margin-bottom: 14px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .tabs button {
+        margin-bottom: -1px;
+        border-radius: 8px 8px 0 0;
+        border-bottom-color: transparent;
+        background: transparent;
+        color: var(--muted);
+      }
+
+      .tabs button[aria-selected="true"] {
+        border-color: var(--line);
+        border-bottom-color: var(--card);
+        background: var(--card);
+        color: var(--text);
+        font-weight: bold;
+      }
+
       /* 項目は縦に並べるだけ。増やすときは .item をもう1つ足す */
       .item {
         padding: 14px 16px;
@@ -146,110 +170,217 @@
         color: #9a7b2f;
         font-size: 12px;
       }
+
+      input[type="text"] {
+        flex: 1;
+        min-width: 120px;
+        padding: 4px 8px;
+        font: inherit;
+        font-size: 13px;
+        border: 1px solid #b9b5aa;
+        border-radius: 6px;
+        background: #fff;
+      }
+
+      /* 口調のつまみ。名前・スライダー・今の数値を横に並べる */
+      .axis {
+        display: grid;
+        grid-template-columns: 6.5em 1fr 2.4em;
+        align-items: center;
+        gap: 8px;
+        margin-top: 12px;
+      }
+
+      .axis-name {
+        font-size: 13px;
+      }
+
+      .axis-value {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* 今の段の話し方。つまみを動かすと、その場で書き換わる */
+      .axis-note {
+        grid-column: 2 / -1;
+        margin: -2px 0 0;
+        color: var(--accent);
+        font-size: 12px;
+      }
+
+      input[type="range"] {
+        width: 100%;
+        margin: 0;
+        accent-color: var(--accent);
+        cursor: pointer;
+      }
+
+      /* どんな数値でもしないこと（tone.js の決まりをそのまま並べる） */
+      #tone-ng {
+        margin: 0;
+        padding-left: 1.2em;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      input[type="range"]:disabled {
+        cursor: default;
+        filter: grayscale(1);
+        opacity: 0.5;
+      }
     </style>
   </head>
   <body>
     <h1>設定</h1>
 
-    <section class="item">
-      <h2>自動起動</h2>
-      <p>Windows にサインインしたとき、マスコットを自動で立ち上げます。</p>
-      <label class="toggle">
-        <input id="open-at-login" type="checkbox" />
-        起動時に自動で立ち上げる
-      </label>
-      <div id="open-at-login-note" class="note" hidden>
-        開発中（npm start）なので、Windows への自動起動の登録は変わりません。設定だけ保存します。
-      </div>
-    </section>
+    <div class="tabs" role="tablist">
+      <button id="tab-basic" type="button" role="tab" data-panel="panel-basic" aria-selected="true">基本</button>
+      <button id="tab-tone" type="button" role="tab" data-panel="panel-tone" aria-selected="false">口調</button>
+    </div>
 
-    <section class="item">
-      <h2>豆の見た目</h2>
-      <p>デスクトップに出ている豆の絵です。大きさは変わりません。</p>
-      <div class="row">
-        <select id="mascot-look"></select>
-      </div>
-    </section>
+    <div id="panel-basic" class="panel">
+      <section class="item">
+        <h2>自動起動</h2>
+        <p>Windows にサインインしたとき、マスコットを自動で立ち上げます。</p>
+        <label class="toggle">
+          <input id="open-at-login" type="checkbox" />
+          起動時に自動で立ち上げる
+        </label>
+        <div id="open-at-login-note" class="note" hidden>
+          開発中（npm start）なので、Windows への自動起動の登録は変わりません。設定だけ保存します。
+        </div>
+      </section>
 
-    <section class="item">
-      <h2>音</h2>
-      <p>お知らせ（タイマー・リマインダー・カレンダー）と、返事が出たときに鳴らす音です。自分の持っている音のファイルも使えます。</p>
-
-      <div class="sub">
-        <div class="sub-title">お知らせの音</div>
+      <section class="item">
+        <h2>豆の見た目</h2>
+        <p>デスクトップに出ている豆の絵です。大きさは変わりません。</p>
         <div class="row">
-          <select id="notify-sound"></select>
-          <button id="notify-sound-test" type="button">試し聞き</button>
+          <select id="mascot-look"></select>
         </div>
-        <div class="row sound-file" id="notify-sound-file-row">
-          <span id="notify-sound-file" class="status"></span>
-          <button id="notify-sound-choose" type="button">音のファイルを選ぶ…</button>
-        </div>
-      </div>
+      </section>
 
-      <div class="sub">
-        <div class="sub-title">返事が出たときの音</div>
+      <section class="item">
+        <h2>音</h2>
+        <p>お知らせ（タイマー・リマインダー・カレンダー）と、返事が出たときに鳴らす音です。自分の持っている音のファイルも使えます。</p>
+
+        <div class="sub">
+          <div class="sub-title">お知らせの音</div>
+          <div class="row">
+            <select id="notify-sound"></select>
+            <button id="notify-sound-test" type="button">試し聞き</button>
+          </div>
+          <div class="row sound-file" id="notify-sound-file-row">
+            <span id="notify-sound-file" class="status"></span>
+            <button id="notify-sound-choose" type="button">音のファイルを選ぶ…</button>
+          </div>
+        </div>
+
+        <div class="sub">
+          <div class="sub-title">返事が出たときの音</div>
+          <div class="row">
+            <select id="reply-sound"></select>
+            <button id="reply-sound-test" type="button">試し聞き</button>
+          </div>
+          <div class="row sound-file" id="reply-sound-file-row">
+            <span id="reply-sound-file" class="status"></span>
+            <button id="reply-sound-choose" type="button">音のファイルを選ぶ…</button>
+          </div>
+        </div>
+
+        <div class="sub">
+          <div class="sub-title">音の大きさ</div>
+          <div class="row">
+            <select id="sound-volume"></select>
+          </div>
+        </div>
+      </section>
+
+      <section class="item">
+        <h2>ほかの PC と会話を共有</h2>
+        <p>Google ドライブなど、ほかの PC と同期しているフォルダに会話を保存して、同じ会話を続けられます。</p>
+        <div id="share-status" class="status"></div>
         <div class="row">
-          <select id="reply-sound"></select>
-          <button id="reply-sound-test" type="button">試し聞き</button>
+          <button id="share-choose" type="button">共有するフォルダを選ぶ…</button>
+          <button id="share-stop" type="button">共有をやめる</button>
         </div>
-        <div class="row sound-file" id="reply-sound-file-row">
-          <span id="reply-sound-file" class="status"></span>
-          <button id="reply-sound-choose" type="button">音のファイルを選ぶ…</button>
-        </div>
-      </div>
+      </section>
 
-      <div class="sub">
-        <div class="sub-title">音の大きさ</div>
+      <section class="item">
+        <h2>カレンダー連携</h2>
+        <p>Google カレンダーの予定を教えたり、会話で予定を入れたりします。予定の10分前に知らせ、その日はじめて起動したときは今日の予定を言います。</p>
         <div class="row">
-          <select id="sound-volume"></select>
+          <select id="calendar-mode"></select>
         </div>
-      </div>
-    </section>
+        <div id="calendar-mode-note" class="note"></div>
 
-    <section class="item">
-      <h2>ほかの PC と会話を共有</h2>
-      <p>Google ドライブなど、ほかの PC と同期しているフォルダに会話を保存して、同じ会話を続けられます。</p>
-      <div id="share-status" class="status"></div>
-      <div class="row">
-        <button id="share-choose" type="button">共有するフォルダを選ぶ…</button>
-        <button id="share-stop" type="button">共有をやめる</button>
-      </div>
-    </section>
+        <div class="sub">
+          <div class="sub-title">Google アカウント</div>
+          <div id="calendar-account" class="status"></div>
+          <div class="row">
+            <button id="calendar-sign-in" type="button">Google でログイン</button>
+            <button id="calendar-sign-out" type="button">ログアウト</button>
+          </div>
+        </div>
 
-    <section class="item">
-      <h2>カレンダー連携</h2>
-      <p>Google カレンダーの予定を教えたり、会話で予定を入れたりします。予定の10分前に知らせ、その日はじめて起動したときは今日の予定を言います。</p>
-      <label class="toggle">
-        <input id="calendar-enabled" type="checkbox" />
-        カレンダー連携を使う
-      </label>
+        <div class="sub">
+          <div class="sub-title">予定を読み直す間隔</div>
+          <p>ほかの所（スマホなど）で予定を変えたとき、豆が気づくまでの時間です。短いほど早く気づきます。</p>
+          <div class="row">
+            <select id="calendar-refresh"></select>
+          </div>
+        </div>
 
-      <div class="sub">
-        <div class="sub-title">Google アカウント</div>
-        <div id="calendar-account" class="status"></div>
+        <div class="sub">
+          <div class="sub-title">クライアント ID のファイル（最初に1回だけ）</div>
+          <div id="calendar-client" class="status"></div>
+          <div class="row">
+            <button id="calendar-client-choose" type="button">ファイルを選ぶ…</button>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div id="panel-tone" class="panel" hidden>
+      <section class="item">
+        <h2>口調のプリセット</h2>
+        <p>まめの話し方を、6つのつまみで決めます。5つまで保存でき、ここで選んだものが次の返事から使われます。</p>
         <div class="row">
-          <button id="calendar-sign-in" type="button">Google でログイン</button>
-          <button id="calendar-sign-out" type="button">ログアウト</button>
+          <select id="tone-preset"></select>
         </div>
-      </div>
 
-      <div class="sub">
-        <div class="sub-title">予定を読み直す間隔</div>
-        <p>ほかの所（スマホなど）で予定を変えたとき、豆が気づくまでの時間です。短いほど早く気づきます。</p>
-        <div class="row">
-          <select id="calendar-refresh"></select>
+        <div class="sub">
+          <div class="sub-title">このプリセットの名前</div>
+          <div class="row">
+            <input id="tone-name" type="text" />
+          </div>
         </div>
-      </div>
 
-      <div class="sub">
-        <div class="sub-title">クライアント ID のファイル（最初に1回だけ）</div>
-        <div id="calendar-client" class="status"></div>
-        <div class="row">
-          <button id="calendar-client-choose" type="button">ファイルを選ぶ…</button>
+        <div class="sub">
+          <div class="sub-title">つまみ</div>
+          <div id="tone-plain-note" class="note" hidden>
+            このプリセットは、今までのまめの口調そのままです。つまみは使いません（動かしたいときは、ほかのプリセットを選んでください）。
+          </div>
+          <div id="tone-axes"></div>
         </div>
-      </div>
-    </section>
+      </section>
+
+      <section class="item">
+        <h2>AI モデル</h2>
+        <p>返事を作る AI です。かしこいほうは口調の指示によく従いますが、そのぶん料金が高くなります。</p>
+        <div class="row">
+          <select id="gemini-model"></select>
+        </div>
+        <div class="note">
+          かしこいほう（flash）でも、内部で考えるぶんの課金は切ってあります。切り替えは、次に話しかけるときから効きます。
+        </div>
+      </section>
+
+      <section class="item">
+        <h2>どんな数値でもしないこと</h2>
+        <p>つまみをどこまで上げても、次のことはしません。</p>
+        <ul id="tone-ng"></ul>
+      </section>
+    </div>
 
     <script src="sound-player.js"></script>
     <script src="settings-window.js"></script>

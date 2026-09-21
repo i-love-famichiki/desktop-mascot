@@ -5,16 +5,36 @@
 //
 // ファイルの中身:
 //   { "openAtLogin": true, "historyFolder": "", "lastShareParent": "",
-//     "calendarEnabled": false, "calendarRefreshMinutes": 15,
+//     "calendarMode": "off", "calendarRefreshMinutes": 15,
 //     "notifySound": "chime", "replySound": "pop", "soundVolume": "medium",
-//     "notifySoundFile": "", "replySoundFile": "", "mascotLook": "pixel-fine" }
+//     "notifySoundFile": "", "replySoundFile": "", "mascotLook": "pixel-fine",
+//     "tonePresetIndex": 0, "tonePresets": [ { "name": "...", "axes": { ... } }, ... ] }
 
 const fs = require('fs');
 const path = require('path');
 const { isSoundId, isVolumeId } = require('./sounds');
+const { DEFAULT_TONE_PRESETS, normalizeTonePresets, normalizeTonePresetIndex } = require('./tone');
+
+// カレンダー連携の使い方。予定の通知（10分前・朝のまとめ）はアプリの中で文章を作るので Gemini を通さないが、
+// 会話で予定を読み書きするには、道具の説明を毎回 Gemini に送ることになる（実測 約1,040トークン／回）。
+// 通知だけほしい人がその分を払わずに済むよう、3つに分けてある
+const CALENDAR_MODES = Object.freeze([
+  { id: 'off', name: '使わない' },
+  { id: 'notify', name: '予定の通知だけ受け取る' },
+  { id: 'full', name: '会話でも予定を読み書きする' },
+]);
 
 // カレンダーの予定を読み直す間隔（分）として選べる値。短いほど早く気づくが、その分 Google への問い合わせが増える
 const CALENDAR_REFRESH_CHOICES = Object.freeze([5, 15, 30, 60]);
+
+// 返事を作る AI モデル。thinking は「モデルが内部で考えた分」で、出力として課金される。
+// lite は考えないので、切る指定（thinkingBudget）を送ると 400 になる。実測:
+//   flash-lite …「1+1は？」で 考えた分 0 / thinkingBudget を送ると 400
+//   flash      …「1+1は？」で 考えた分 53 / thinkingBudget: 0 で 0 になる
+const GEMINI_MODELS = Object.freeze([
+  { id: 'gemini-3.5-flash-lite', name: '軽い（flash-lite）', thinking: false },
+  { id: 'gemini-3.5-flash', name: 'かしこい（flash）', thinking: true },
+]);
 
 // 豆の見た目。index.html にこの名前の絵（data-look）が置いてある
 const MASCOT_LOOKS = Object.freeze([
@@ -31,8 +51,8 @@ const DEFAULT_SETTINGS = Object.freeze({
   historyFolder: '',
   // 共有フォルダを選ぶダイアログを次に開く場所（共有をやめても覚えておく）
   lastShareParent: '',
-  // Google カレンダー連携を使うか（ログイン情報は別のファイル。google-auth.js）
-  calendarEnabled: false,
+  // Google カレンダー連携の使い方（CALENDAR_MODES の名前。ログイン情報は別のファイル。google-auth.js）
+  calendarMode: 'off',
   // 予定を読み直す間隔（分）。ほかの所で予定を足したり動かしたりしても、この間隔で気づく
   calendarRefreshMinutes: 15,
   // お知らせ（タイマー・リマインダー・カレンダー）の音。sounds.js の名前か 'none' / 'custom'
@@ -46,6 +66,11 @@ const DEFAULT_SETTINGS = Object.freeze({
   replySoundFile: '',
   // 豆の見た目（MASCOT_LOOKS の名前）
   mascotLook: 'pixel-fine',
+  // 返事を作る AI モデル（GEMINI_MODELS の名前）
+  geminiModel: 'gemini-3.5-flash-lite',
+  // 口調のプリセット（5個）と、最後に使っていたものの番号。中身は tone.js
+  tonePresetIndex: 0,
+  tonePresets: DEFAULT_TONE_PRESETS,
 });
 
 /** 設定を読む。ファイルが無い・壊れている・知らない値は初期値で補う */
@@ -62,6 +87,12 @@ function loadSettings(filePath) {
   for (const key of Object.keys(DEFAULT_SETTINGS)) {
     if (typeof data?.[key] === typeof DEFAULT_SETTINGS[key]) settings[key] = data[key];
   }
+  // 前のかたち（calendarEnabled: true/false）で保存された設定も、そのまま使えるようにする
+  if (typeof data?.calendarMode !== 'string' && typeof data?.calendarEnabled === 'boolean') {
+    settings.calendarMode = data.calendarEnabled ? 'full' : 'off';
+  }
+  if (!CALENDAR_MODES.some((mode) => mode.id === settings.calendarMode)) settings.calendarMode = DEFAULT_SETTINGS.calendarMode;
+
   // 手で書き換えられていても、選べる値のどれかにする
   if (!CALENDAR_REFRESH_CHOICES.includes(settings.calendarRefreshMinutes)) {
     settings.calendarRefreshMinutes = DEFAULT_SETTINGS.calendarRefreshMinutes;
@@ -71,6 +102,10 @@ function loadSettings(filePath) {
   }
   if (!isVolumeId(settings.soundVolume)) settings.soundVolume = DEFAULT_SETTINGS.soundVolume;
   if (!MASCOT_LOOKS.some((look) => look.id === settings.mascotLook)) settings.mascotLook = DEFAULT_SETTINGS.mascotLook;
+  if (!GEMINI_MODELS.some((model) => model.id === settings.geminiModel)) settings.geminiModel = DEFAULT_SETTINGS.geminiModel;
+  // 口調は入れ子になっているので、中のつまみの値まで tone.js に整えてもらう
+  settings.tonePresets = normalizeTonePresets(data?.tonePresets);
+  settings.tonePresetIndex = normalizeTonePresetIndex(settings.tonePresetIndex);
   return settings;
 }
 
@@ -82,4 +117,4 @@ function saveSettings(filePath, settings) {
   fs.renameSync(tmp, filePath);
 }
 
-module.exports = { DEFAULT_SETTINGS, CALENDAR_REFRESH_CHOICES, MASCOT_LOOKS, loadSettings, saveSettings };
+module.exports = { DEFAULT_SETTINGS, CALENDAR_MODES, CALENDAR_REFRESH_CHOICES, MASCOT_LOOKS, GEMINI_MODELS, loadSettings, saveSettings };

@@ -45,6 +45,8 @@
       "archive-store.js",
       "reminder-store.js",
       "settings.js",
+      "tone.js",
+      "chat-tools.js",
       "sounds.js",
       "sound-player.js",
       "sse.js",

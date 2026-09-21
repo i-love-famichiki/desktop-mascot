@@ -6,9 +6,21 @@ const path = require('path');
 const { HistoryStore } = require('./history-store');
 const { searchConversations, mergeMessages, parseDay } = require('./archive-store');
 const { ReminderStore } = require('./reminder-store');
-const { loadSettings, saveSettings, CALENDAR_REFRESH_CHOICES, MASCOT_LOOKS } = require('./settings');
+const { loadSettings, saveSettings, CALENDAR_MODES, CALENDAR_REFRESH_CHOICES, MASCOT_LOOKS, GEMINI_MODELS } = require('./settings');
+const {
+  TONE_AXES,
+  TONE_NG_ITEMS,
+  TONE_PRESET_COUNT,
+  TONE_NAME_MAX_CHARS,
+  PLAIN_TONE_PRESET_INDEX,
+  clampAxisValue,
+  toneSteps,
+  normalizeToneName,
+  tonePromptLines,
+} = require('./tone');
 const { soundChoices, SOUND_VOLUMES, AUDIO_EXTENSIONS, SoundError, importSoundFile, playable, volumeById } = require('./sounds');
 const { createSseParser } = require('./sse');
+const { toolGroups: chatToolGroups } = require('./chat-tools');
 const { parseCompressCommand, compressImages, describeResult } = require('./image-compress');
 const { GoogleAuth, GoogleAuthError } = require('./google-auth');
 const {
@@ -42,11 +54,16 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 // Gemini API で返事をもらう。キーは環境変数 GEMINI_API_KEY から読む。
-// 雑談用なので速くて安いモデルを使う。賢さが欲しくなったら 'gemini-3.8-flash' などに。
-const MODEL = 'gemini-3.5-flash-lite';
-const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
-// 会話の返事は、できた分から少しずつ受け取る（alt=sse で Server-Sent Events の形になる）
-const GEMINI_STREAM_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:streamGenerateContent?alt=sse`;
+// どのモデルを使うかは設定で選ぶ（settings.geminiModel、選択肢は settings.js の GEMINI_MODELS）
+function currentModel() {
+  return GEMINI_MODELS.find((model) => model.id === settings.geminiModel) ?? GEMINI_MODELS[0];
+}
+
+/** 話しかけるさきの URL。会話の返事は、できた分から少しずつ受け取る（alt=sse で Server-Sent Events の形になる） */
+function geminiEndpoint(stream) {
+  const base = `https://generativelanguage.googleapis.com/v1beta/models/${currentModel().id}`;
+  return stream ? `${base}:streamGenerateContent?alt=sse` : `${base}:generateContent`;
+}
 
 const GEMINI_TIMEOUT_MS = 30 * 1000;
 
@@ -75,7 +92,7 @@ const SUMMARY_PROMPT = [
 // 天気やニュースは Google 検索（tools の google_search）で調べられるので、
 // 検索するかどうかはモデル自身に判断させる。
 // 日付は話しかけるたびに入れ直す（モデルは今日が何日か知らない）。
-function buildSystemPrompt() {
+function buildSystemPrompt(groups = { timer: true, history: true, calendar: calendarInChat() }) {
   const now = new Date().toLocaleString('ja-JP', { dateStyle: 'full', timeStyle: 'short' });
   return [
     'あなたはユーザーのデスクトップに住んでいるマスコットです。',
@@ -89,17 +106,28 @@ function buildSystemPrompt() {
     'ユーザーの発言の先頭にある [9月16日 21:33] のような表記は、その発言をした日時です。',
     '「さっき」「朝に話した」などの時間の感覚に使ってください。返事には、この日時の表記を付けないでください。',
     '名前はまだありません。ユーザーが名前をくれたら喜んで受け取ってください。',
-    '口調は親しみやすく、少しだけ子どもっぽく、絵文字は使いません。',
+    // 口調のプリセットを使っているときは、ここで口調を決めない（決めると、下の【まめの口調設定】と
+    // 引っぱり合って毒舌などが弱まる）。絵文字を使わないことだけは、どちらでも守らせる
+    ...(usingTonePreset() ? ['絵文字は使いません。'] : ['口調は親しみやすく、少しだけ子どもっぽく、絵文字は使いません。']),
     '返事は必ず日本語で、基本は2〜3文の短さに収めてください。画面の小さな吹き出しに表示されます。',
-    ...reminderPromptLines(),
-    ...calendarPromptLines(),
-    '',
-    '以前の会話について聞かれ、下の会話や要約だけでは詳しく分からないときは、search_history で保管庫を探してから答えてください。',
-    '言い換えも考えて、言葉はいくつか渡してください（例: 転職、仕事を変える、退職）。',
-    '「一年前」「去年の夏」などは、現在の日時をもとに期間（from / to）に直してください。',
-    '見つからなかったときは、覚えていないと正直に答えてください。見つからない話を作ってはいけません。',
+    // 道具の使い方は、その道具を渡す回にだけ書く（渡していない道具の話を書くと、
+    // 持っていない道具を使ったつもりで返事をしてしまう）
+    ...(groups.timer ? reminderPromptLines() : []),
+    ...(groups.calendar ? calendarPromptLines() : CALENDAR_OFF_LINES),
+    ...(groups.history
+      ? [
+          '',
+          '以前の会話について聞かれ、下の会話や要約だけでは詳しく分からないときは、search_history で保管庫を探してから答えてください。',
+          '言い換えも考えて、言葉はいくつか渡してください（例: 転職、仕事を変える、退職）。',
+          '「一年前」「去年の夏」などは、現在の日時をもとに期間（from / to）に直してください。',
+          '見つからなかったときは、覚えていないと正直に答えてください。見つからない話を作ってはいけません。',
+        ]
+      : []),
     ...pastDaysPromptLines(),
     ...memoryPromptLines(),
+    // 口調の指示は一番最後に置く。中の「絶対的NGライン」が、ほかの指示に上書きされにくいようにするため
+    // （1番目のプリセットのときは何も足さないので、今までと同じプロンプトになる）
+    ...tonePromptLines(settings.tonePresets, settings.tonePresetIndex),
   ].join('\n');
 }
 
@@ -527,7 +555,10 @@ function settingsState() {
     // 開発中（npm start）は Windows の自動起動の登録を変えないので、画面でそう伝える
     isPackaged: app.isPackaged,
     calendar: {
-      enabled: calendarActive(),
+      mode: settings.calendarMode,
+      modeChoices: CALENDAR_MODES.map(({ id, name }) => ({ id, name })),
+      // 会話で予定を触るときだけ、毎回この分だけ入力が増える（実測値）
+      chatTokens: 1040,
       hasClient: googleAuth.hasClient(),
       email: googleAuth.email,
       signingIn: Boolean(googleAuth.signingIn),
@@ -535,6 +566,19 @@ function settingsState() {
       refreshChoices: [...CALENDAR_REFRESH_CHOICES],
     },
     look: { id: settings.mascotLook, choices: [...MASCOT_LOOKS] },
+    model: { id: settings.geminiModel, choices: GEMINI_MODELS.map(({ id, name }) => ({ id, name })) },
+    tone: {
+      index: settings.tonePresetIndex,
+      presets: settings.tonePresets.map((preset) => ({ name: preset.name, axes: { ...preset.axes } })),
+      // つまみの説明と、止まる所（段）は tone.js が持っている。
+      // Gemini に渡す文そのもの（levels の例文や caveat）は画面に出さないので渡さない
+      axes: TONE_AXES.map((axis) => ({ id: axis.id, name: axis.name, note: axis.note, steps: toneSteps(axis) })),
+      // このプリセットだけは、つまみを使わない（今までの口調のまま）
+      plainIndex: PLAIN_TONE_PRESET_INDEX,
+      nameMaxChars: TONE_NAME_MAX_CHARS,
+      // つまみをどこまで上げてもしないこと（画面に並べて見せる）
+      ngItems: [...TONE_NG_ITEMS],
+    },
     sound: {
       choices: soundChoices(),
       volume: settings.soundVolume,
@@ -607,8 +651,8 @@ ipcMain.handle('settings:calendar-sign-in', async (event) => {
   notifySettingsChanged();
   try {
     await signingIn;
-    // ログインしたら、そのままカレンダー連携を ON にする
-    setCalendarEnabled(true);
+    // ログインしたら通知だけ始める。会話で予定を触るかは、トークンが増えるので自分で選んでもらう
+    if (settings.calendarMode === 'off') setCalendarMode('notify');
   } catch (err) {
     if (!(err instanceof GoogleAuthError && err.kind === 'canceled')) {
       console.error('[google]', err.message);
@@ -622,13 +666,15 @@ ipcMain.handle('settings:calendar-sign-in', async (event) => {
 ipcMain.handle('settings:calendar-sign-out', async (event) => {
   if (!fromSettingsWindow(event)) return settingsState();
   await googleAuth.signOut();
-  setCalendarEnabled(false);
+  setCalendarMode('off');
   return settingsState();
 });
 
-ipcMain.handle('settings:set-calendar-enabled', (event, enabled) => {
-  // ログインしていないときは ON にできない
-  if (fromSettingsWindow(event)) setCalendarEnabled(Boolean(enabled) && Boolean(googleAuth.account));
+ipcMain.handle('settings:set-calendar-mode', (event, mode) => {
+  // ログインしていないときは「使わない」のまま
+  if (fromSettingsWindow(event) && CALENDAR_MODES.some((choice) => choice.id === mode)) {
+    setCalendarMode(googleAuth.account ? mode : 'off');
+  }
   return settingsState();
 });
 
@@ -697,6 +743,16 @@ ipcMain.handle('settings:set-mascot-look', (event, id) => {
   return settingsState();
 });
 
+// 返事を作るモデル。次に話しかけるときから新しいモデルになる
+ipcMain.handle('settings:set-model', (event, id) => {
+  if (fromSettingsWindow(event) && GEMINI_MODELS.some((model) => model.id === id)) {
+    settings = { ...settings, geminiModel: id };
+    saveSettings(settingsFile, settings);
+    notifySettingsChanged();
+  }
+  return settingsState();
+});
+
 ipcMain.handle('settings:set-sound-volume', (event, id) => {
   if (fromSettingsWindow(event) && SOUND_VOLUMES.some((volume) => volume.id === id)) saveSoundSettings({ soundVolume: id });
   return settingsState();
@@ -724,6 +780,60 @@ ipcMain.handle('settings:choose-sound-file', async (event, slot) => {
 });
 
 // ---------------------------------------------------------------------------
+// 口調（6つのつまみと、5つのプリセット）
+// ---------------------------------------------------------------------------
+// 変えた口調は、次の返事から効く（システムプロンプトは話しかけるたびに作り直すため）。
+// 1番目のプリセットは今までの口調そのままなので、つまみは保存するだけで返事には使わない
+
+/** 6つのつまみを使うプリセットを選んでいるか（1番目は今までの口調そのまま） */
+function usingTonePreset() {
+  return settings.tonePresetIndex !== PLAIN_TONE_PRESET_INDEX;
+}
+
+function saveTone(next) {
+  settings = { ...settings, ...next };
+  saveSettings(settingsFile, settings);
+  notifySettingsChanged();
+}
+
+/** 画面から来た番号が、5つのプリセットのどれかであること */
+function isTonePresetIndex(index) {
+  return Number.isInteger(index) && index >= 0 && index < TONE_PRESET_COUNT;
+}
+
+/** そのプリセットだけを差し替えた、新しい一覧 */
+function tonePresetsWith(index, preset) {
+  return settings.tonePresets.map((current, i) => (i === index ? preset : current));
+}
+
+// 使うプリセットを切り替える（次に起動したときも、ここで選んだものに戻る）
+ipcMain.handle('settings:select-tone-preset', (event, index) => {
+  const at = Number(index);
+  if (fromSettingsWindow(event) && isTonePresetIndex(at)) saveTone({ tonePresetIndex: at });
+  return settingsState();
+});
+
+// つまみを1つ動かす。範囲の外の値は、その軸で選べる値に丸める
+ipcMain.handle('settings:set-tone-axis', (event, index, axisId, value) => {
+  const at = Number(index);
+  const axis = TONE_AXES.find((item) => item.id === axisId);
+  if (fromSettingsWindow(event) && isTonePresetIndex(at) && axis) {
+    const preset = settings.tonePresets[at];
+    saveTone({ tonePresets: tonePresetsWith(at, { ...preset, axes: { ...preset.axes, [axis.id]: clampAxisValue(axis, value) } }) });
+  }
+  return settingsState();
+});
+
+// プリセットの名前を付け替える。空にしたときは、もとの名前（「プリセット2」など）に戻す
+ipcMain.handle('settings:rename-tone-preset', (event, index, name) => {
+  const at = Number(index);
+  if (fromSettingsWindow(event) && isTonePresetIndex(at)) {
+    saveTone({ tonePresets: tonePresetsWith(at, { ...settings.tonePresets[at], name: normalizeToneName(name, at) }) });
+  }
+  return settingsState();
+});
+
+// ---------------------------------------------------------------------------
 // このアプリについて（バージョン情報）
 // ---------------------------------------------------------------------------
 async function showAbout() {
@@ -735,7 +845,7 @@ async function showAbout() {
     detail: [
       'デスクトップに住む枝豆のマスコット',
       '',
-      `AI のモデル: ${MODEL}`,
+      `AI のモデル: ${currentModel().id}`,
       `会話の保存先: ${store.filePath}`,
       `Electron ${process.versions.electron} / Chromium ${process.versions.chrome}`,
     ].join('\n'),
@@ -932,6 +1042,15 @@ ipcMain.handle('image:compress', async (event, paths, text) => {
 // 知らせる文は登録のときに Gemini が決めておくので、知らせるときは Gemini を呼ばない
 const REMINDER_CHECK_INTERVAL_MS = 1000;
 
+/** この発言で渡す道具の組み合わせ（中身は chat-tools.js） */
+function toolGroups(userText) {
+  return chatToolGroups(userText, {
+    // 登録中のタイマーがあるときは、取り消しや問い合わせに答えられるよう必ず渡す
+    hasReminders: reminders.items.length > 0,
+    calendarInChat: calendarInChat(),
+  });
+}
+
 // 会話で Gemini に渡す道具（タイマーとリマインダー、昔の会話探し）
 const CHAT_FUNCTIONS = {
   declarations: [
@@ -996,11 +1115,16 @@ const CHAT_FUNCTIONS = {
   call: (functionCall) => (functionCall.name === 'search_history' ? searchHistory(functionCall.args) : callReminderFunction(functionCall)),
 };
 
-/** 今回の会話で渡す道具。カレンダー連携が ON のときだけ、カレンダーの道具も足す */
-function chatFunctions() {
-  if (!calendarActive()) return CHAT_FUNCTIONS;
+/** 今回の会話で渡す道具。使いそうにない道具は、説明ごと渡さない */
+function chatFunctions(groups) {
+  const declarations = [
+    ...(groups.history ? CHAT_FUNCTIONS.declarations.filter((d) => d.name === 'search_history') : []),
+    ...(groups.timer ? CHAT_FUNCTIONS.declarations.filter((d) => d.name !== 'search_history') : []),
+    ...(groups.calendar ? CALENDAR_FUNCTION_DECLARATIONS : []),
+  ];
+  if (declarations.length === 0) return null;
   return {
-    declarations: [...CHAT_FUNCTIONS.declarations, ...CALENDAR_FUNCTION_DECLARATIONS],
+    declarations,
     call: (functionCall) =>
       CALENDAR_FUNCTION_NAMES.has(functionCall.name) ? callCalendarFunction(functionCall) : CHAT_FUNCTIONS.call(functionCall),
   };
@@ -1183,20 +1307,35 @@ const CALENDAR_FUNCTION_DECLARATIONS = [
 const CALENDAR_FUNCTION_NAMES = new Set(CALENDAR_FUNCTION_DECLARATIONS.map((declaration) => declaration.name));
 
 /** カレンダー連携を使うか（設定で ON、かつ Google にログインしている） */
-function calendarActive() {
-  return settings.calendarEnabled && Boolean(googleAuth.account);
+/** 予定の通知（10分前・朝のまとめ）を出すか。Gemini は通さないので、トークンはかからない */
+function calendarNotifying() {
+  return settings.calendarMode !== 'off' && Boolean(googleAuth.account);
 }
 
-function setCalendarEnabled(enabled) {
-  settings = { ...settings, calendarEnabled: enabled };
+/**
+ * 会話で予定を読み書きできるようにするか。
+ * こちらを ON にすると、予定の道具の説明を毎回 Gemini に送ることになる（実測 約1,040トークン／回）
+ */
+function calendarInChat() {
+  return settings.calendarMode === 'full' && Boolean(googleAuth.account);
+}
+
+function setCalendarMode(mode) {
+  settings = { ...settings, calendarMode: mode };
   saveSettings(settingsFile, settings);
   resetCalendarCache();
   notifySettingsChanged();
 }
 
+// カレンダーの道具を渡さない回に出す1行（つながっていない回も、予定の話が出ていない回も同じ）
+const CALENDAR_OFF_LINES = Object.freeze([
+  '',
+  'ユーザーの Google カレンダーとはつながっていません。予定を聞かれたら、右クリックメニューの「設定を開く」でカレンダー連携をつなげられると伝えてください。',
+]);
+
 function calendarPromptLines() {
-  if (!calendarActive()) {
-    return ['', 'ユーザーの Google カレンダーとはつながっていません。予定を聞かれたら、右クリックメニューの「設定を開く」でカレンダー連携をつなげられると伝えてください。'];
+  if (!calendarInChat()) {
+    return [...CALENDAR_OFF_LINES];
   }
   return [
     '',
@@ -1334,7 +1473,7 @@ function saveCalendarState(state) {
 
 /** 1秒ごとに呼ばれる。10分前になった予定を知らせ、ときどき予定を読み直す */
 function checkCalendar() {
-  if (!calendarActive()) {
+  if (!calendarNotifying()) {
     briefingPending = false;
     return;
   }
@@ -1415,9 +1554,11 @@ ipcMain.handle('chat:history', () => ({
 
 async function chat(userText, onDelta) {
   try {
+    const groups = toolGroups(userText);
     const { text, sources, searchSuggestions } = await askGemini(buildContents(store.messages, userText), {
       onDelta,
-      functions: chatFunctions(),
+      systemPrompt: buildSystemPrompt(groups),
+      functions: chatFunctions(groups),
     });
     // 返事を表示するのに保存の完了は待たない（失敗しても store 側でログに出す）
     store.append(
@@ -1491,6 +1632,70 @@ class GeminiError extends Error {
   }
 }
 
+// ---------------------------------------------------------------------------
+// 使ったトークンを見る（課金の内訳を確かめるとき用）
+// ---------------------------------------------------------------------------
+// ふだんは何も出さない。確かめたいときは MASCOT_DEBUG_TOKENS=1 を付けて起動する
+const DEBUG_TOKENS = process.env.MASCOT_DEBUG_TOKENS === '1';
+
+// その日の合計を残しておくファイル。立ち上げ直しても数え続けられるようにする
+// （請求の画面に内訳が出ないので、使った量はこちらで数えるしかない）
+const tokenLogFile = path.join(dataDir, 'token-log.json');
+
+/** 今日の合計を読む。日が変わっていたら 0 から数え直す */
+function loadTokenLog() {
+  const today = localDateKey(Date.now());
+  try {
+    const saved = JSON.parse(fs.readFileSync(tokenLogFile, 'utf8'));
+    if (saved.date === today) return saved;
+  } catch {
+    // 無ければ今日のぶんを新しく作る
+  }
+  return { date: today, requests: 0, prompt: 0, output: 0, thoughts: 0, searches: 0 };
+}
+
+/** 1回ぶんの内訳と、今日の合計を出す。検索（グラウンディング）が走ったかも数える */
+function logTokens(chunks) {
+  const usage = chunks.findLast((chunk) => chunk?.usageMetadata)?.usageMetadata;
+  if (!usage) return;
+  const prompt = usage.promptTokenCount ?? 0;
+  const output = usage.candidatesTokenCount ?? 0;
+  // 「考えた分」は画面には出ないが、出力として課金される
+  const thoughts = usage.thoughtsTokenCount ?? 0;
+  // Google 検索が走った回は、トークンとは別に1回いくらで課金されることがある
+  const searched = chunks.some((chunk) => chunk?.candidates?.[0]?.groundingMetadata);
+
+  const total = loadTokenLog();
+  total.requests += 1;
+  total.prompt += prompt;
+  total.output += output;
+  total.thoughts += thoughts;
+  total.searches += searched ? 1 : 0;
+  try {
+    fs.mkdirSync(dataDir, { recursive: true });
+    fs.writeFileSync(tokenLogFile, JSON.stringify(total, null, 2), 'utf8');
+  } catch (err) {
+    console.warn('[tokens] 記録できませんでした:', err.message);
+  }
+
+  console.log(
+    `[tokens] ${currentModel().id} 入力 ${prompt} / 出力 ${output} / 考えた分 ${thoughts}${searched ? ' / 検索あり' : ''}`,
+    `｜今日 ${total.requests}回 入力 ${total.prompt} / 出力 ${total.output} / 考えた分 ${total.thoughts} / 検索 ${total.searches}回`,
+  );
+}
+
+/** 入力の何が長いのかを、文字数で見る（トークンではないが、削る所を探すには十分） */
+function logPromptParts(systemPrompt, contents) {
+  // 要約のときは口調を入れないので、入っている回だけ数える
+  const tone = tonePromptLines(settings.tonePresets, settings.tonePresetIndex).join('\n');
+  const toneChars = systemPrompt.includes('【まめの口調設定】') ? tone.length : 0;
+  const talkChars = JSON.stringify(contents).length;
+  console.log(
+    `[tokens] 入力の中身（文字数）: システム ${systemPrompt.length}`,
+    `（うち口調 ${toneChars}）／ 送った会話 ${talkChars}`,
+  );
+}
+
 // タイマーの登録や昔の会話探しで、道具を使う → 結果を返す、を繰り返す回数の上限
 // （探して見つからず、言葉を変えてもう一度探すこともあるので少し余裕を持たせる）
 const MAX_TOOL_ROUNDS = 4;
@@ -1512,6 +1717,7 @@ async function askGemini(
   if (!apiKey) throw new GeminiError('no-key', 'GEMINI_API_KEY が設定されていません');
 
   const allTools = functions ? [...tools, { functionDeclarations: functions.declarations }] : tools;
+  if (DEBUG_TOKENS) logPromptParts(systemPrompt, contents);
   const texts = [];
   let finishReason;
   let groundingMetadata;
@@ -1523,7 +1729,12 @@ async function askGemini(
       ...(allTools.length > 0 && { tools: allTools }),
       // Google 検索と自作の道具を一緒に渡すときは、この指定が要る
       ...(functions && tools.length > 0 && { toolConfig: { includeServerSideToolInvocations: true } }),
+      // 内部で考えた分も出力として課金されるので、雑談では考えさせない。
+      // 考えないモデル（lite）にこの指定を送ると 400 になるので、考えるモデルにだけ付ける
+      ...(currentModel().thinking && { generationConfig: { thinkingConfig: { thinkingBudget: 0 } } }),
     }, onDelta);
+
+    if (DEBUG_TOKENS) logTokens(chunks);
 
     // 少しずつ受け取ったときは、本文をつなげ、終わり方と検索の情報は最後に来たものを使う
     const blockReason = chunks.find((chunk) => chunk?.promptFeedback?.blockReason)?.promptFeedback.blockReason;
@@ -1580,7 +1791,7 @@ async function requestGemini(apiKey, body, onDelta) {
   try {
     // Chromium の通信機能を使う（OS の証明書ストアを使うので、セキュリティソフトの割り込みにも強い）
     // 時間切れは、返事を最後まで受け取り終わるまでを数える
-    res = await net.fetch(onDelta ? GEMINI_STREAM_ENDPOINT : GEMINI_ENDPOINT, {
+    res = await net.fetch(geminiEndpoint(Boolean(onDelta)), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
       body: JSON.stringify(body),
