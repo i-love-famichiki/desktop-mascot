@@ -1,6 +1,6 @@
 {
   "name": "desktop-mascot",
-  "version": "1.0.15",
+  "version": "1.0.16",
   "description": "デスクトップに住む枝豆のマスコット",
   "main": "main.js",
   "scripts": {
