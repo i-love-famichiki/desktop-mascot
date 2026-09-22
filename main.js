@@ -20,6 +20,7 @@ const {
 } = require('./tone');
 const { soundChoices, SOUND_VOLUMES, AUDIO_EXTENSIONS, SoundError, importSoundFile, playable, volumeById } = require('./sounds');
 const { createSseParser } = require('./sse');
+const { TokenLog } = require('./token-log');
 const { toolGroups: chatToolGroups } = require('./chat-tools');
 const { parseCompressCommand, compressImages, describeResult } = require('./image-compress');
 const { GoogleAuth, GoogleAuthError } = require('./google-auth');
@@ -1720,54 +1721,31 @@ class GeminiError extends Error {
 }
 
 // ---------------------------------------------------------------------------
-// 使ったトークンを見る（課金の内訳を確かめるとき用）
+// 使ったトークンを数える（課金の内訳を確かめるとき用）
 // ---------------------------------------------------------------------------
-// ふだんは何も出さない。確かめたいときは MASCOT_DEBUG_TOKENS=1 を付けて起動する
+// 請求の画面に回数や内訳が出ないので、日ごと・モデルごとの合計をいつも token-log.json に残しておく。
+// 画面に出すのは、MASCOT_DEBUG_TOKENS=1 を付けて起動したときだけ
 const DEBUG_TOKENS = process.env.MASCOT_DEBUG_TOKENS === '1';
 
-// その日の合計を残しておくファイル。立ち上げ直しても数え続けられるようにする
-// （請求の画面に内訳が出ないので、使った量はこちらで数えるしかない）
-const tokenLogFile = path.join(dataDir, 'token-log.json');
+// この PC の中に置く（共有フォルダには置かない）。テストのときは MASCOT_TOKEN_LOG_FILE で差し替えられる
+const tokenLog = new TokenLog(
+  process.env.MASCOT_TOKEN_LOG_FILE
+    ? path.resolve(process.env.MASCOT_TOKEN_LOG_FILE)
+    : path.join(dataDir, 'token-log.json'),
+);
 
-/** 今日の合計を読む。日が変わっていたら 0 から数え直す */
-function loadTokenLog() {
-  const today = localDateKey(Date.now());
-  try {
-    const saved = JSON.parse(fs.readFileSync(tokenLogFile, 'utf8'));
-    if (saved.date === today) return saved;
-  } catch {
-    // 無ければ今日のぶんを新しく作る
-  }
-  return { date: today, requests: 0, prompt: 0, output: 0, thoughts: 0, searches: 0 };
-}
-
-/** 1回ぶんの内訳と、今日の合計を出す。検索（グラウンディング）が走ったかも数える */
+/** 1回ぶんを記録する。検索（グラウンディング）が走ったかも数える */
 function logTokens(chunks) {
   const usage = chunks.findLast((chunk) => chunk?.usageMetadata)?.usageMetadata;
   if (!usage) return;
-  const prompt = usage.promptTokenCount ?? 0;
-  const output = usage.candidatesTokenCount ?? 0;
-  // 「考えた分」は画面には出ないが、出力として課金される
-  const thoughts = usage.thoughtsTokenCount ?? 0;
-  // Google 検索が走った回は、トークンとは別に1回いくらで課金されることがある
+  const model = currentModel().id;
   const searched = chunks.some((chunk) => chunk?.candidates?.[0]?.groundingMetadata);
-
-  const total = loadTokenLog();
-  total.requests += 1;
-  total.prompt += prompt;
-  total.output += output;
-  total.thoughts += thoughts;
-  total.searches += searched ? 1 : 0;
-  try {
-    fs.mkdirSync(dataDir, { recursive: true });
-    fs.writeFileSync(tokenLogFile, JSON.stringify(total, null, 2), 'utf8');
-  } catch (err) {
-    console.warn('[tokens] 記録できませんでした:', err.message);
-  }
+  const total = tokenLog.record({ date: localDateKey(Date.now()), model, usage, searched });
+  if (!DEBUG_TOKENS) return;
 
   console.log(
-    `[tokens] ${currentModel().id} 入力 ${prompt} / 出力 ${output} / 考えた分 ${thoughts}${searched ? ' / 検索あり' : ''}`,
-    `｜今日 ${total.requests}回 入力 ${total.prompt} / 出力 ${total.output} / 考えた分 ${total.thoughts} / 検索 ${total.searches}回`,
+    `[tokens] ${model} 入力 ${usage.promptTokenCount ?? 0} / 出力 ${usage.candidatesTokenCount ?? 0} / 考えた分 ${usage.thoughtsTokenCount ?? 0}${searched ? ' / 検索あり' : ''}`,
+    `｜今日このモデルで ${total.requests}回 入力 ${total.prompt} / 出力 ${total.output} / 考えた分 ${total.thoughts} / 検索 ${total.searches}回`,
   );
 }
 
@@ -1821,7 +1799,7 @@ async function askGemini(
       ...(currentModel().thinking && { generationConfig: { thinkingConfig: { thinkingBudget: 0 } } }),
     }, onDelta);
 
-    if (DEBUG_TOKENS) logTokens(chunks);
+    logTokens(chunks);
 
     // 少しずつ受け取ったときは、本文をつなげ、終わり方と検索の情報は最後に来たものを使う
     const blockReason = chunks.find((chunk) => chunk?.promptFeedback?.blockReason)?.promptFeedback.blockReason;
