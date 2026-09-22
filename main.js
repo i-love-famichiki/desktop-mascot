@@ -93,7 +93,7 @@ const SUMMARY_PROMPT = [
 // 天気やニュースは Google 検索（tools の google_search）で調べられるので、
 // 検索するかどうかはモデル自身に判断させる。
 // 日付は話しかけるたびに入れ直す（モデルは今日が何日か知らない）。
-function buildSystemPrompt(groups = { timer: true, history: true, calendar: calendarInChat() }) {
+function buildSystemPrompt(groups = { timer: true, history: true, calendar: calendarInChat(), pastDays: true }) {
   const now = new Date().toLocaleString('ja-JP', { dateStyle: 'full', timeStyle: 'short' });
   return [
     'あなたはユーザーのデスクトップに住んでいるマスコットです。',
@@ -127,7 +127,7 @@ function buildSystemPrompt(groups = { timer: true, history: true, calendar: cale
           '見つからなかったときは、覚えていないと正直に答えてください。見つからない話を作ってはいけません。',
         ]
       : []),
-    ...pastDaysPromptLines(),
+    ...(groups.pastDays ? pastDaysPromptLines() : PAST_DAYS_IDLE_LINES),
     ...memoryPromptLines(),
     // 口調の指示は一番最後に置く。中の「絶対的NGライン」が、ほかの指示に上書きされにくいようにするため
     // （1番目のプリセットのときは何も足さないので、今までと同じプロンプトになる）
@@ -158,7 +158,8 @@ function formatMessageTime(at) {
   return `${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
-// 昨日から6日前までの詳しい会話。今日の会話は contents で送るので、ここには入れない
+// 昨日から6日前までの詳しい会話。今日の会話は contents で送るので、ここには入れない。
+// 約700トークンあるので、昔の話が出た回にだけ入れる（chat-tools.js の pastDays）
 function pastDaysPromptLines() {
   const messages = store.pastDaysMessages();
   if (messages.length === 0) return [];
@@ -172,6 +173,12 @@ function pastDaysPromptLines() {
     }),
   ];
 }
+
+// 昨日より前の会話を入れない回に出す1行。入れていないのに、覚えているふりで話を合わせないようにする
+const PAST_DAYS_IDLE_LINES = Object.freeze([
+  '',
+  '昨日より前の会話は、この回は渡していません。前に話したことを持ち出されて分からないときは、知ったかぶりせず短く聞き返してください。',
+]);
 
 // 7日より前の会話は要約だけが残っている。話題に関係があるときだけ使ってもらう
 function memoryPromptLines() {

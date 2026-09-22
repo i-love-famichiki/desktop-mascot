@@ -13,7 +13,7 @@ const at = (text, state) => toolGroups(text, state);
 
 test('ただの雑談では、どの道具も渡さない（ここでトークンが浮く）', () => {
   for (const text of ['こんばんは', 'ありがとう', 'おなかすいた', 'そうなんだ', '豆って何色？']) {
-    assert.deepEqual(at(text, { calendarInChat: true }), { timer: false, history: false, calendar: false }, text);
+    assert.deepEqual(at(text, { calendarInChat: true }), { timer: false, history: false, calendar: false, pastDays: false }, text);
   }
 });
 
@@ -69,6 +69,20 @@ test('タイマーが登録されているときは、言葉が無くても渡�
 
 test('空や数字でない入力でも落ちない', () => {
   for (const bad of ['', null, undefined, 123]) {
-    assert.deepEqual(at(bad), { timer: false, history: false, calendar: false });
+    assert.deepEqual(at(bad), { timer: false, history: false, calendar: false, pastDays: false });
   }
+});
+
+test('昨日より前の会話は、昔の話が出たときだけ渡す（ふだんの雑談で約700トークン浮く）', () => {
+  for (const t of ['昨日話したキーボード、届いたよ', 'この前の本なんだっけ', 'こないだの続きだけど', 'あれからどうなったと思う？', '前に言ってたお店']) {
+    assert.equal(at(t).pastDays, true, t);
+  }
+  for (const t of ['おはよう', '円周率ってなんで無限？', '新しいキーボード買った！']) {
+    assert.equal(at(t).pastDays, false, t);
+  }
+});
+
+test('ひとつ前が昔の話なら、「それそれ」のような続きにも昨日より前の会話を渡す', () => {
+  assert.equal(at('それそれ！', { previousText: '昨日の映画の話' }).pastDays, true);
+  assert.equal(at('それそれ！', { previousText: 'おなかすいた' }).pastDays, false);
 });
