@@ -86,6 +86,35 @@ test('2番目以降は、6つの数値と NG ラインが入った指示にな�
   assert.match(text, /この4つは、6軸の数値がいくつであっても必ず守ってください。$/);
 });
 
+// 感情の評価が「この回は刺す理由がない」と出たとき、毒舌強度だけを差し替える。
+// プリセットの値をそのまま書いておくと、判定が 0 でも「毒舌強度9 = 見下しも隠さない」に引っぱられた
+test('その回だけ、毒舌強度を差し替えられる', () => {
+  const presets = normalizeTonePresets([null, { name: 'きつめ', axes: { sharp: 9, kind: 9 } }]);
+  const いつも = tonePromptLines(presets, 1).join('\n');
+  const 刺さない = tonePromptLines(presets, 1, 0).join('\n');
+  const 控えめ = tonePromptLines(presets, 1, 3).join('\n');
+
+  assert.match(いつも, /1\. 毒舌強度: 9\n/);
+  assert.match(刺さない, /1\. 毒舌強度: 0\n/);
+  assert.match(控えめ, /1\. 毒舌強度: 3\n/);
+  // 0 のときは、毒舌を言わない段の指示になる
+  assert.match(刺さない, /毒舌は言わない。/);
+  assert.doesNotMatch(刺さない, /見下しも隠さない/);
+  // 何が毒舌に当たるかを具体的に並べる（「毒舌強度 0」だけでは止まらなかった）
+  assert.match(刺さない, /【この回は毒舌を使いません】/);
+  assert.match(刺さない, /暇を持て余している/);
+  assert.match(刺さない, /そっけない相づちや短い返事を返されても/);
+  // 0 のときは、毒舌の向け先の話も出さない
+  assert.doesNotMatch(刺さない, /【毒舌の向け先】/);
+  // 刺してよい回では、その注意書きは出さない
+  assert.doesNotMatch(いつも, /【この回は毒舌を使いません】/);
+  assert.doesNotMatch(控えめ, /【この回は毒舌を使いません】/);
+  // ほかの軸は差し替えない
+  assert.match(刺さない, /4\. 優しさ: 9\n/);
+  // NG ラインは、どの回でも最後に残る
+  assert.match(刺さない, /この4つは、6軸の数値がいくつであっても必ず守ってください。$/);
+});
+
 test('毒舌が7以上のときは、ぼかさず言い切らせる', () => {
   const at = (sharp) => tonePromptLines(normalizeTonePresets([null, { name: '毒舌', axes: { sharp } }]), 1).join('\n');
 

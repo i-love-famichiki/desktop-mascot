@@ -16,8 +16,17 @@ const {
   clampAxisValue,
   toneSteps,
   normalizeToneName,
+  normalizeTonePresetIndex,
   tonePromptLines,
 } = require('./tone');
+const {
+  APPRAISAL_SCHEMA,
+  SEVERITY_BASED,
+  MoodLog,
+  judgePromptLines,
+  emotionPromptLines,
+  withSharpness,
+} = require('./appraisal');
 const { soundChoices, SOUND_VOLUMES, AUDIO_EXTENSIONS, SoundError, importSoundFile, playable, volumeById } = require('./sounds');
 const { createSseParser } = require('./sse');
 const { TokenLog } = require('./token-log');
@@ -93,7 +102,7 @@ const SUMMARY_PROMPT = [
 // 天気やニュースは Google 検索（tools の google_search）で調べられるので、
 // 検索するかどうかはモデル自身に判断させる。
 // 日付は話しかけるたびに入れ直す（モデルは今日が何日か知らない）。
-function buildSystemPrompt(groups = { timer: true, history: true, calendar: calendarInChat(), pastDays: true }) {
+function buildSystemPrompt(groups = { timer: true, history: true, calendar: calendarInChat(), pastDays: true }, appraisal = null) {
   const now = new Date().toLocaleString('ja-JP', { dateStyle: 'full', timeStyle: 'short' });
   return [
     'あなたはユーザーのデスクトップに住んでいるマスコットです。',
@@ -131,7 +140,10 @@ function buildSystemPrompt(groups = { timer: true, history: true, calendar: cale
     ...memoryPromptLines(),
     // 口調の指示は一番最後に置く。中の「絶対的NGライン」が、ほかの指示に上書きされにくいようにするため
     // （1番目のプリセットのときは何も足さないので、今までと同じプロンプトになる）
-    ...tonePromptLines(settings.tonePresets, settings.tonePresetIndex),
+    // 感情の評価をした回は、毒舌強度をその回の値に差し替えて渡す（刺す理由がなければ 0）。
+    // プリセットの値をそのまま書くと、判定が 0 でも「毒舌強度9 = 見下しも隠さない」に引っぱられる
+    ...tonePromptLines(settings.tonePresets, settings.tonePresetIndex, appraisal?.sharpness ?? null),
+    ...(appraisal ? emotionPromptLines(appraisal) : []),
   ].join('\n');
 }
 
@@ -801,6 +813,81 @@ function usingTonePreset() {
   return settings.tonePresetIndex !== PLAIN_TONE_PRESET_INDEX;
 }
 
+/** 今使っているプリセットのつまみ */
+function currentToneAxes() {
+  return settings.tonePresets[normalizeTonePresetIndex(settings.tonePresetIndex)].axes;
+}
+
+// 直近の感情（感情の引きずり）。会話履歴とは別のファイルで、この PC の中にだけ置く。
+// テストのときは MASCOT_MOOD_FILE で差し替えられる
+const moodLog = new MoodLog(
+  process.env.MASCOT_MOOD_FILE ? path.resolve(process.env.MASCOT_MOOD_FILE) : path.join(dataDir, 'mood.json'),
+);
+
+/**
+ * 感情の評価（Appraisal）を使うか。
+ * 1番目のプリセット（今までの口調）のときは、口調の指示ごと足さないので使わない
+ */
+function usingAppraisal() {
+  return usingTonePreset();
+}
+
+// 判定に渡す会話の数（往復）。直前の流れが分かれば足りるので短く切る
+const JUDGE_HISTORY_TURNS = 2;
+
+/**
+ * 返事を書く前に、今の発言をどう受け取ったかだけを判定してもらう。
+ * 口調も検索も道具も渡さないので、入力は 600 字ほどで済む。
+ * 判定できなかったときは null を返し、呼び出し元は毒舌なしとして扱う
+ * （通信が失敗したからといって、刺してよいことにはしないため）
+ */
+async function judgeAppraisal(userText) {
+  const messages = store.messages.slice(-JUDGE_HISTORY_TURNS * 2);
+  const contents = [
+    ...messages.map((message) => ({
+      role: message.role === 'user' ? 'user' : 'model',
+      parts: [{ text: message.content }],
+    })),
+    { role: 'user', parts: [{ text: userText }] },
+  ];
+  try {
+    const { text } = await askGemini(contents, {
+      systemPrompt: judgePromptLines(moodLog.load()).join('\n'),
+      tools: [],
+      schema: APPRAISAL_SCHEMA,
+    });
+    return withSharpness(JSON.parse(text), currentToneAxes());
+  } catch (err) {
+    console.warn('[appraisal] 判定できませんでした。この回は毒舌なしで返します:', err.message);
+    // 判定なし = 毒舌なし。記録には残さない（本当に そう感じた わけではないため）
+    return { ...withSharpness(null, currentToneAxes()), failed: true };
+  }
+}
+
+/**
+ * 1ターンぶんの感情を残す。
+ * 上限（毒舌強度）で抑えた回は、どれくらい抑えたかを残しておく
+ */
+function recordMood(result) {
+  const { appraisal, emotion, sharpness } = result;
+  const limit = currentToneAxes().sharp;
+  if (emotion.primary === 'anger' && emotion.raw_intensity > limit) {
+    console.log(`[appraisal] 怒りの強さ ${emotion.raw_intensity} を、毒舌強度 ${limit} まで抑えて返事を書かせました`);
+  }
+  // 程度から計算し直している感情だけ、Gemini の言い値とのずれを見る
+  // （喜びなどは言い値をそのまま使うので、比べても意味がない）
+  if (SEVERITY_BASED.includes(emotion.primary) && Math.abs(emotion.model_intensity - emotion.raw_intensity) >= 4) {
+    console.warn(`[appraisal] 強さの食い違い: Gemini ${emotion.model_intensity} / 計算 ${emotion.raw_intensity}`);
+  }
+  if (DEBUG_TOKENS) {
+    console.log(
+      `[appraisal] ${emotion.primary} 強さ ${emotion.raw_intensity} / 毒舌 ${sharpness}（上限 ${limit}）`,
+      `｜違反 ${appraisal.violation_severity} 実害 ${appraisal.distress_severity} 原因 ${appraisal.responsible_agent}`,
+    );
+  }
+  moodLog.record({ at: Date.now(), emotion: emotion.primary, intensity: emotion.raw_intensity, sharpness });
+}
+
 // 口調を変える前の会話を、メモとして渡すときの上限（文字数）
 const BEFORE_TONE_CHANGE_MAX_CHARS = 2000;
 // そのメモの中の、まめの返事1つあたりの上限。言い回しまで渡すと口調が移るので、中身が分かる程度に切る
@@ -842,6 +929,8 @@ function toneChangedPromptLines() {
 function saveTone(next) {
   settings = { ...settings, ...next };
   saveSettings(settingsFile, settings);
+  // 口調を変えたら、前の口調で出た感情は引きずらせない（毒舌 9 で怒った気分を、優しいプリセットに持ち込まない）
+  if (next.toneChangedAt) moodLog.clear();
   notifySettingsChanged();
 }
 
@@ -1649,11 +1738,15 @@ ipcMain.handle('chat:history', () => ({
 async function chat(userText, onDelta) {
   try {
     const groups = toolGroups(userText);
+    // 先に感情だけを判定し、その結果で毒舌の指示を差し替えてから返事を書かせる。
+    // 同じ呼び出しで両方やらせると、判定が 0 でも口調の指示に引っぱられて刺してしまう（appraisal.js）
+    const appraisal = usingAppraisal() ? await judgeAppraisal(userText) : null;
     const { text, sources, searchSuggestions } = await askGemini(buildContents(store.messages, userText), {
       onDelta,
-      systemPrompt: buildSystemPrompt(groups),
+      systemPrompt: buildSystemPrompt(groups, appraisal),
       functions: chatFunctions(groups),
     });
+    if (appraisal && !appraisal.failed) recordMood(appraisal);
     // 返事を表示するのに保存の完了は待たない（失敗しても store 側でログに出す）
     store.append(
       { role: 'user', content: userText, at: Date.now() },
@@ -1783,7 +1876,13 @@ const MAX_TOOL_ROUNDS = 4;
  */
 async function askGemini(
   contents,
-  { systemPrompt = buildSystemPrompt(), tools = [{ google_search: {} }], onDelta = null, functions = null } = {},
+  {
+    systemPrompt = buildSystemPrompt(),
+    tools = [{ google_search: {} }],
+    onDelta = null,
+    functions = null,
+    schema = null,
+  } = {},
 ) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new GeminiError('no-key', 'GEMINI_API_KEY が設定されていません');
@@ -1794,6 +1893,8 @@ async function askGemini(
   let finishReason;
   let groundingMetadata;
 
+  const config = generationConfig(schema);
+
   for (let round = 1; ; round++) {
     const chunks = await requestGemini(apiKey, {
       systemInstruction: { parts: [{ text: systemPrompt }] },
@@ -1801,9 +1902,7 @@ async function askGemini(
       ...(allTools.length > 0 && { tools: allTools }),
       // Google 検索と自作の道具を一緒に渡すときは、この指定が要る
       ...(functions && tools.length > 0 && { toolConfig: { includeServerSideToolInvocations: true } }),
-      // 内部で考えた分も出力として課金されるので、雑談では考えさせない。
-      // 考えないモデル（lite）にこの指定を送ると 400 になるので、考えるモデルにだけ付ける
-      ...(currentModel().thinking && { generationConfig: { thinkingConfig: { thinkingBudget: 0 } } }),
+      ...(config && { generationConfig: config }),
     }, onDelta);
 
     logTokens(chunks);
@@ -1851,6 +1950,20 @@ async function askGemini(
     sources: extractSources(groundingMetadata),
     searchSuggestions: extractSearchSuggestions(groundingMetadata),
   };
+}
+
+/**
+ * 1回のリクエストに付ける generationConfig。要らないときは null。
+ * 内部で考えた分も出力として課金されるので、雑談では考えさせない。
+ * 考えないモデル（lite）に thinkingConfig を送ると 400 になるので、考えるモデルにだけ付ける
+ */
+function generationConfig(schema) {
+  const config = {
+    ...(currentModel().thinking && { thinkingConfig: { thinkingBudget: 0 } }),
+    // 決まった形で返してもらう。Google 検索や自作の道具と一緒に使っても問題ないことは確認済み
+    ...(schema && { responseMimeType: 'application/json', responseSchema: schema }),
+  };
+  return Object.keys(config).length > 0 ? config : null;
 }
 
 /**

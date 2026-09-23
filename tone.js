@@ -146,6 +146,19 @@ const TONE_TARGET_LINES = Object.freeze([
   'ただし、実在の人や第三者への悪口は、下のNGラインのとおり禁止です。',
 ]);
 
+// 感情の評価（appraisal.js）で「この回は刺す理由がない」と出たときに足す。
+// 「毒舌強度 0」と書くだけでは止まらず、「暇を持て余しているんだね」「的外れな感想だね」のような
+// 軽い見下しが残っていたので、何が毒舌に当たるかをここで具体的に並べる
+const NO_SHARP_LINES = Object.freeze([
+  '【この回は毒舌を使いません】',
+  'ユーザーは今回、刺されるようなことを何も言っていません。次はすべて毒舌なので、1つも使わないでください。',
+  '- けなす言葉（「中身がない」「的外れ」「暇を持て余している」「意味のない」「雑」「薄っぺらい」）',
+  '- 見下す問いかけ（「本気で言ってる？」「どこで覚えてきたの」「〜したらどうなのさ」「自覚あるの？」）',
+  '- 呆れ・うんざりを示す言い方（「またか」「いい加減にして」「うんざりする」「呆れる」）',
+  'そっけない相づちや短い返事を返されても、それは刺す理由になりません。ふつうに受け止めてください。',
+  '直前の自分の返事が毒舌でも、今回はまねしないでください。',
+]);
+
 // 保存しておけるプリセットの数
 const TONE_PRESET_COUNT = 5;
 // 1番目のプリセットは、今までの口調そのまま（6軸を一切使わない）。番号は後から変えないこと
@@ -220,12 +233,20 @@ function normalizeTonePresetIndex(value) {
 
 /**
  * システムプロンプトに足す、口調の指示。
- * 1番目のプリセット（今までの口調）のときは何も足さない＝今までと同じプロンプトになる
+ * 1番目のプリセット（今までの口調）のときは何も足さない＝今までと同じプロンプトになる。
+ *
+ * sharpness を渡すと、毒舌強度だけをその値に差し替える。感情の評価（appraisal.js）で
+ * 「この回は刺す理由がない」と出たときに 0 を渡すため。プリセットの値をそのまま書いておくと、
+ * 判定が 0 でも「毒舌強度9 = 見下しも隠さない」に引っぱられて刺してしまう
+ * @param {number | null} [sharpness] その回だけの毒舌強度（0〜10）。省略するとプリセットのまま
  */
-function tonePromptLines(presets, index) {
+function tonePromptLines(presets, index, sharpness = null) {
   const at = normalizeTonePresetIndex(index);
   if (at === PLAIN_TONE_PRESET_INDEX) return [];
-  const { axes } = normalizeTonePresets(presets)[at];
+  const saved = normalizeTonePresets(presets)[at];
+  // 段（1・3・5・7・9）に寄せずに使う。0 のときは「毒舌強度: 0」と書きたいため
+  const capped = Number.isFinite(sharpness) ? Math.max(0, Math.min(10, Math.round(sharpness))) : null;
+  const axes = capped === null ? saved.axes : { ...saved.axes, [SHARP_AXIS_ID]: capped };
 
   const lines = [
     '',
@@ -244,6 +265,8 @@ function tonePromptLines(presets, index) {
     );
   });
   if (axes[SHARP_AXIS_ID] >= SHARP_TARGET_MIN) lines.push(...TONE_TARGET_LINES, '');
+  // 「毒舌強度 0」の段の文だけでは刺すのが止まらなかったので、当たるものを具体で示す
+  if (capped === 0) lines.push(...NO_SHARP_LINES, '');
   lines.push(
     '【言い回し】',
     '上の例文は、言い方の目安です。そのままの言葉を毎回使い回さないでください。',
@@ -270,6 +293,7 @@ module.exports = {
   TONE_NG_ITEMS,
   TONE_TARGET_LINES,
   TONE_NG_LINES,
+  NO_SHARP_LINES,
   TONE_PRESET_COUNT,
   TONE_NAME_MAX_CHARS,
   PLAIN_TONE_PRESET_INDEX,

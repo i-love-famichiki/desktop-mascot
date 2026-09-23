@@ -46,6 +46,7 @@
       "reminder-store.js",
       "settings.js",
       "tone.js",
+      "appraisal.js",
       "chat-tools.js",
       "sounds.js",
       "sound-player.js",
