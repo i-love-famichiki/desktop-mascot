@@ -152,6 +152,15 @@ test('優しさが低いときは、毒舌のあとにフォローを付けさ�
   assert.match(flat, /感嘆符を重ねず/);
 });
 
+test('一人称は、使う言葉を決めて書く（禁止だけにしない）', () => {
+  const text = tonePromptLines(normalizeTonePresets([null, { name: 'x', axes: { sharp: 9 } }]), 1).join('\n');
+
+  assert.match(text, /一人称は「ぼく」。/);
+  // 「「我」を使わず」と書いていたとき、かえって「我」「我輩」が返事に出ていた。
+  // 指示の中にその言葉を残さない
+  assert.ok(!text.includes('我'), '使ってほしくない一人称を、指示の中に書かないこと');
+});
+
 test('設定の数値や見出しを、返事に書かないよう言い添える', () => {
   const text = tonePromptLines(normalizeTonePresets([null, { name: 'x', axes: { sharp: 10 } }]), 1).join('\n');
   assert.match(text, /返事には絶対に書かないでください/);
