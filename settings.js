@@ -7,7 +7,7 @@
 //   { "openAtLogin": true, "historyFolder": "", "lastShareParent": "",
 //     "calendarMode": "off", "calendarRefreshMinutes": 15,
 //     "notifySound": "chime", "replySound": "pop", "soundVolume": "medium",
-//     "notifySoundFile": "", "replySoundFile": "", "mascotLook": "pixel-fine",
+//     "notifySoundFile": "", "replySoundFile": "", "mascotLook": "smooth",
 //     "tonePresetIndex": 0, "tonePresets": [ { "name": "...", "axes": { ... } }, ... ] }
 
 const fs = require('fs');
@@ -38,7 +38,7 @@ const GEMINI_MODELS = Object.freeze([
 
 // 豆の見た目。index.html にこの名前の絵（data-look）が置いてある
 const MASCOT_LOOKS = Object.freeze([
-  { id: 'smooth', name: 'なめらか（前の豆）' },
+  { id: 'smooth', name: 'なめらか' },
   { id: 'pixel-coarse', name: '8ビット・あらい' },
   { id: 'pixel-normal', name: '8ビット・ふつう' },
   { id: 'pixel-fine', name: '8ビット・こまかい' },
@@ -65,7 +65,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   notifySoundFile: '',
   replySoundFile: '',
   // 豆の見た目（MASCOT_LOOKS の名前）
-  mascotLook: 'pixel-fine',
+  mascotLook: 'smooth',
   // 返事を作る AI モデル（GEMINI_MODELS の名前）
   geminiModel: 'gemini-3.5-flash-lite',
   // どの API キーを使うか。'env:GEMINI_API_KEY' のような環境変数か、'saved'（設定画面で入れたキー。api-key.js）

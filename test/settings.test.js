@@ -28,7 +28,7 @@ function tempFile() {
 }
 
 test('ファイルが無ければ初期値（自動起動は ON）', () => {
-  assert.deepEqual(loadSettings(tempFile()), { openAtLogin: true, historyFolder: '', lastShareParent: '', calendarMode: 'off', calendarRefreshMinutes: 15, notifySound: 'chime', replySound: 'pop', soundVolume: 'medium', notifySoundFile: '', replySoundFile: '', mascotLook: 'pixel-fine', ...tone() });
+  assert.deepEqual(loadSettings(tempFile()), { openAtLogin: true, historyFolder: '', lastShareParent: '', calendarMode: 'off', calendarRefreshMinutes: 15, notifySound: 'chime', replySound: 'pop', soundVolume: 'medium', notifySoundFile: '', replySoundFile: '', mascotLook: 'smooth', ...tone() });
   assert.equal(DEFAULT_SETTINGS.openAtLogin, true);
 });
 
@@ -69,16 +69,16 @@ test('保存した設定を読み直せる（OFF にしたら OFF のまま）',
 test('先頭に BOM が付いたファイルも読める（メモ帳や PowerShell で保存した場合）', () => {
   const file = tempFile();
   fs.writeFileSync(file, '﻿{ "openAtLogin": false }', 'utf8');
-  assert.deepEqual(loadSettings(file), { openAtLogin: false, historyFolder: '', lastShareParent: '', calendarMode: 'off', calendarRefreshMinutes: 15, notifySound: 'chime', replySound: 'pop', soundVolume: 'medium', notifySoundFile: '', replySoundFile: '', mascotLook: 'pixel-fine', ...tone() });
+  assert.deepEqual(loadSettings(file), { openAtLogin: false, historyFolder: '', lastShareParent: '', calendarMode: 'off', calendarRefreshMinutes: 15, notifySound: 'chime', replySound: 'pop', soundVolume: 'medium', notifySoundFile: '', replySoundFile: '', mascotLook: 'smooth', ...tone() });
 });
 
 test('壊れたファイル・型の違う値は初期値で補う', () => {
   const file = tempFile();
   fs.writeFileSync(file, '{ こわれている');
-  assert.deepEqual(loadSettings(file), { openAtLogin: true, historyFolder: '', lastShareParent: '', calendarMode: 'off', calendarRefreshMinutes: 15, notifySound: 'chime', replySound: 'pop', soundVolume: 'medium', notifySoundFile: '', replySoundFile: '', mascotLook: 'pixel-fine', ...tone() });
+  assert.deepEqual(loadSettings(file), { openAtLogin: true, historyFolder: '', lastShareParent: '', calendarMode: 'off', calendarRefreshMinutes: 15, notifySound: 'chime', replySound: 'pop', soundVolume: 'medium', notifySoundFile: '', replySoundFile: '', mascotLook: 'smooth', ...tone() });
 
   fs.writeFileSync(file, JSON.stringify({ openAtLogin: 'no', historyFolder: 3, unknown: 1 }));
-  assert.deepEqual(loadSettings(file), { openAtLogin: true, historyFolder: '', lastShareParent: '', calendarMode: 'off', calendarRefreshMinutes: 15, notifySound: 'chime', replySound: 'pop', soundVolume: 'medium', notifySoundFile: '', replySoundFile: '', mascotLook: 'pixel-fine', ...tone() });
+  assert.deepEqual(loadSettings(file), { openAtLogin: true, historyFolder: '', lastShareParent: '', calendarMode: 'off', calendarRefreshMinutes: 15, notifySound: 'chime', replySound: 'pop', soundVolume: 'medium', notifySoundFile: '', replySoundFile: '', mascotLook: 'smooth', ...tone() });
 });
 
 test('予定を読み直す間隔は、選べる値以外なら初期値（15分）にする', () => {
@@ -99,12 +99,12 @@ test('豆の見た目は、index.html にある絵の名前だけ', () => {
   const file = tempFile();
   assert.deepEqual(MASCOT_LOOKS.map((look) => look.id), ['smooth', 'pixel-coarse', 'pixel-normal', 'pixel-fine']);
 
-  fs.writeFileSync(file, JSON.stringify({ mascotLook: 'smooth' }));
-  assert.equal(loadSettings(file).mascotLook, 'smooth');
+  fs.writeFileSync(file, JSON.stringify({ mascotLook: 'pixel-fine' }));
+  assert.equal(loadSettings(file).mascotLook, 'pixel-fine');
 
   for (const bad of ['', 'ドット', 'SMOOTH', 8, null]) {
     fs.writeFileSync(file, JSON.stringify({ mascotLook: bad }));
-    assert.equal(loadSettings(file).mascotLook, 'pixel-fine');
+    assert.equal(loadSettings(file).mascotLook, 'smooth');
   }
 });
 
