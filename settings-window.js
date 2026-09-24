@@ -10,6 +10,19 @@ const shareChooseEl = $('share-choose');
 const shareStopEl = $('share-stop');
 const mascotLookEl = $('mascot-look');
 const geminiModelEl = $('gemini-model');
+const webSearchEl = $('web-search');
+const keepPastEl = $('keep-past');
+const apiKeyModeEls = { env: $('api-key-mode-env'), saved: $('api-key-mode-saved') };
+const apiKeyEnvNameEl = $('api-key-env-name');
+const apiKeyEnvListEl = $('api-key-env-list');
+const apiKeyEnvUseEl = $('api-key-env-use');
+const apiKeyEnvStatusEl = $('api-key-env-status');
+const apiKeySavedStatusEl = $('api-key-saved-status');
+const apiKeyInputEl = $('api-key-input');
+const apiKeySaveEl = $('api-key-save');
+const apiKeyClearEl = $('api-key-clear');
+const apiKeyMessageEl = $('api-key-message');
+const usageSummaryEl = $('usage-summary');
 const soundEls = {
   notify: {
     select: $('notify-sound'),
@@ -59,6 +72,17 @@ function render(state) {
 
   fillSelect(geminiModelEl, state.model.choices, state.model.id);
   geminiModelEl.disabled = busy;
+  webSearchEl.checked = state.webSearch;
+  webSearchEl.disabled = busy;
+  keepPastEl.checked = state.keepPast;
+  keepPastEl.disabled = busy;
+
+  renderApiKey(state.apiKey);
+
+  const { usage } = state;
+  usageSummaryEl.textContent =
+    `${usage.month}: ${usage.requests.toLocaleString()} 回（今日 ${usage.todayRequests.toLocaleString()} 回）` +
+    `・検索 ${usage.searches.toLocaleString()} 回（月 ${usage.searchFree.toLocaleString()} 回まで無料）・料金の目安 約 ${usage.yen.toLocaleString()} 円`;
 
   renderSound(state.sound);
   renderTone(state.tone);
@@ -215,6 +239,43 @@ function buildToneAxes(tone) {
   );
 }
 
+// 「キーをここに貼る」を選んだけれど、まだ保存していない間だけ 'saved'（それ以外は保存されている方に合わせる）
+let apiKeyModeWanted = null;
+
+/** API キーの欄。選んでいない方の欄は押せなくして、両方に書かないようにする */
+function renderApiKey(apiKey) {
+  const mode = apiKeyModeWanted ?? apiKey.mode;
+  apiKeyModeEls.env.checked = mode === 'env';
+  apiKeyModeEls.saved.checked = mode === 'saved';
+  for (const el of Object.values(apiKeyModeEls)) el.disabled = busy;
+
+  const envOn = mode === 'env';
+  // 打っている途中の名前は消さない
+  if (document.activeElement !== apiKeyEnvNameEl) apiKeyEnvNameEl.value = apiKey.envName;
+  apiKeyEnvListEl.replaceChildren(...apiKey.suggestions.map((name) => Object.assign(document.createElement('option'), { value: name })));
+  apiKeyEnvNameEl.disabled = busy || !envOn;
+  apiKeyEnvUseEl.disabled = busy || !envOn;
+  apiKeyEnvStatusEl.hidden = !envOn;
+  apiKeyEnvStatusEl.textContent = apiKey.envHint
+    ? `${apiKey.envName} を使っています（最後の4文字: ${apiKey.envHint.slice(1)}）`
+    : `${apiKey.envName} という環境変数が見つかりません`;
+  apiKeyEnvStatusEl.classList.toggle('on', Boolean(apiKey.envHint));
+
+  const savedOn = mode === 'saved';
+  apiKeyInputEl.disabled = busy || !savedOn;
+  apiKeySaveEl.disabled = busy || !savedOn;
+  apiKeyClearEl.disabled = busy || !apiKey.savedHint;
+  apiKeySavedStatusEl.textContent = apiKey.savedHint
+    ? `保存してあるキー（最後の4文字: ${apiKey.savedHint.slice(1)}）${apiKey.mode === 'saved' ? ' を使っています' : ''}`
+    : 'まだ貼っていません';
+  apiKeySavedStatusEl.classList.toggle('on', apiKey.mode === 'saved' && Boolean(apiKey.savedHint));
+}
+
+function showApiKeyMessage(message) {
+  apiKeyMessageEl.textContent = message;
+  apiKeyMessageEl.hidden = !message;
+}
+
 /** 上のタブ。押した方の中身だけを出す */
 function selectTab(panelId) {
   for (const tab of tabEls) {
@@ -276,6 +337,58 @@ async function run(action) {
 openAtLoginEl.addEventListener('change', () => run(() => window.settingsApi.setOpenAtLogin(openAtLoginEl.checked)));
 mascotLookEl.addEventListener('change', () => run(() => window.settingsApi.setMascotLook(mascotLookEl.value)));
 geminiModelEl.addEventListener('change', () => run(() => window.settingsApi.setModel(geminiModelEl.value)));
+// 環境変数を使う名前にする（空なら GEMINI_API_KEY）
+function useEnvName() {
+  const name = apiKeyEnvNameEl.value.trim() || 'GEMINI_API_KEY';
+  if (!/^\w+$/.test(name)) {
+    showApiKeyMessage('環境変数の名前は、英数字と _ だけで書いてください。');
+    return;
+  }
+  apiKeyModeWanted = null;
+  run(() => window.settingsApi.setApiKeySource(`env:${name}`));
+}
+apiKeyEnvUseEl.addEventListener('click', useEnvName);
+apiKeyEnvNameEl.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') useEnvName();
+});
+apiKeyModeEls.env.addEventListener('change', useEnvName);
+apiKeyModeEls.saved.addEventListener('change', () => {
+  if (lastState?.apiKey.savedHint) {
+    apiKeyModeWanted = null;
+    run(() => window.settingsApi.setApiKeySource('saved'));
+  } else {
+    // まだ貼っていなければ、欄を使えるようにするだけ。保存したときに切り替わる
+    apiKeyModeWanted = 'saved';
+    render(lastState);
+    showApiKeyMessage('キーを貼って「確かめて保存」を押すと、こちらに切り替わります。');
+    apiKeyInputEl.focus();
+  }
+});
+apiKeySaveEl.addEventListener('click', () =>
+  run(async () => {
+    const { ok, message } = await window.settingsApi.saveApiKey(apiKeyInputEl.value);
+    // 保存できたら、貼ったキーは欄に残さない
+    if (ok) {
+      apiKeyInputEl.value = '';
+      apiKeyModeWanted = null;
+    }
+    showApiKeyMessage(message);
+  }),
+);
+apiKeyClearEl.addEventListener('click', () =>
+  run(async () => {
+    const using = lastState?.apiKey.mode === 'saved';
+    await window.settingsApi.clearApiKey();
+    apiKeyModeWanted = null;
+    showApiKeyMessage(using ? '貼ったキーを消しました。環境変数 GEMINI_API_KEY に戻します。' : '貼ったキーを消しました。');
+  }),
+);
+// 使った量は話すたびに増えるので、設定ウィンドウに戻ってきたときに読み直す
+window.addEventListener('focus', async () => {
+  if (!busy) render(await window.settingsApi.get());
+});
+keepPastEl.addEventListener('change', () => run(() => window.settingsApi.setKeepPast(keepPastEl.checked)));
+webSearchEl.addEventListener('change', () => run(() => window.settingsApi.setWebSearch(webSearchEl.checked)));
 
 for (const [slot, els] of Object.entries(soundEls)) {
   // 選び直したらすぐ鳴らして、どんな音か分かるようにする

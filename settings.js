@@ -68,6 +68,15 @@ const DEFAULT_SETTINGS = Object.freeze({
   mascotLook: 'pixel-fine',
   // 返事を作る AI モデル（GEMINI_MODELS の名前）
   geminiModel: 'gemini-3.5-flash-lite',
+  // どの API キーを使うか。'env:GEMINI_API_KEY' のような環境変数か、'saved'（設定画面で入れたキー。api-key.js）
+  apiKeySource: 'env:GEMINI_API_KEY',
+  // 昨日より前の会話（要約・保管庫）を残して使うか。切っても今日の会話は覚えている。
+  // 切る前にためた分は消さずに残し、使わないだけ（戻せばまた思い出す）
+  keepPast: true,
+  // keepPast を切った時刻（ON の間は 0）。これより後の発言だけを残さない
+  keepPastOffAt: 0,
+  // 会話で Google 検索を使うか。無料枠では検索つきの呼び出しが 429 になるので、切れば雑談だけ無料で使える
+  webSearch: true,
   // 口調のプリセット（5個）と、最後に使っていたものの番号。中身は tone.js
   tonePresetIndex: 0,
   tonePresets: DEFAULT_TONE_PRESETS,
@@ -105,6 +114,7 @@ function loadSettings(filePath) {
   if (!isVolumeId(settings.soundVolume)) settings.soundVolume = DEFAULT_SETTINGS.soundVolume;
   if (!MASCOT_LOOKS.some((look) => look.id === settings.mascotLook)) settings.mascotLook = DEFAULT_SETTINGS.mascotLook;
   if (!GEMINI_MODELS.some((model) => model.id === settings.geminiModel)) settings.geminiModel = DEFAULT_SETTINGS.geminiModel;
+  if (settings.apiKeySource !== 'saved' && !/^env:\w+$/.test(settings.apiKeySource)) settings.apiKeySource = DEFAULT_SETTINGS.apiKeySource;
   // 口調は入れ子になっているので、中のつまみの値まで tone.js に整えてもらう
   settings.tonePresets = normalizeTonePresets(data?.tonePresets);
   settings.tonePresetIndex = normalizeTonePresetIndex(settings.tonePresetIndex);

@@ -13,6 +13,10 @@ const { DEFAULT_TONE_PRESETS, normalizeTonePresets } = require('../tone');
 // 口調のプリセットは長いので、ここでは tone.js の初期値をそのまま使う（中身は test/tone.test.js）
 const tone = () => ({
   geminiModel: 'gemini-3.5-flash-lite',
+  apiKeySource: 'env:GEMINI_API_KEY',
+  keepPast: true,
+  keepPastOffAt: 0,
+  webSearch: true,
   tonePresetIndex: 0,
   tonePresets: normalizeTonePresets(DEFAULT_TONE_PRESETS),
   toneChangedAt: 0,
@@ -131,6 +135,29 @@ test('AI モデルは、選べるものだけ（知らない名前なら軽い�
     fs.writeFileSync(file, JSON.stringify({ geminiModel: bad }));
     assert.equal(loadSettings(file).geminiModel, 'gemini-3.5-flash-lite');
   }
+});
+
+test('API キーは、環境変数か設定画面で入れたキー。変な値なら GEMINI_API_KEY に戻す', () => {
+  const file = tempFile();
+  for (const good of ['saved', 'env:GEMINI_API_FREE']) {
+    fs.writeFileSync(file, JSON.stringify({ apiKeySource: good }));
+    assert.equal(loadSettings(file).apiKeySource, good);
+  }
+  for (const bad of ['', 'env:', 'env:A B', 'GEMINI_API_KEY', 3]) {
+    fs.writeFileSync(file, JSON.stringify({ apiKeySource: bad }));
+    assert.equal(loadSettings(file).apiKeySource, 'env:GEMINI_API_KEY');
+  }
+});
+
+test('Google 検索は初期値 ON。切った設定は残り、変な値なら ON に戻す', () => {
+  const file = tempFile();
+  assert.equal(loadSettings(file).webSearch, true);
+
+  saveSettings(file, { ...loadSettings(file), webSearch: false });
+  assert.equal(loadSettings(file).webSearch, false);
+
+  fs.writeFileSync(file, JSON.stringify({ webSearch: 'off' }));
+  assert.equal(loadSettings(file).webSearch, true);
 });
 
 test('カレンダーは3つの使い方から選ぶ（前の ON/OFF で保存された設定も読める）', () => {

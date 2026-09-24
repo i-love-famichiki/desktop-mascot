@@ -17,6 +17,40 @@ const TOKEN_LOG_KEEP_DAYS = 400;
 // 1版の token-log.json は「今日の合計」だけだった。どのモデルかは分からないので、この名前で残す
 const UNKNOWN_MODEL = '（モデル不明）';
 
+// 料金の目安（100 万トークンあたりのドル）。2026-09-22 に請求の画面と照らし合わせた値。
+// 「考えた分」は出力として課金される。知らないモデル（1版の記録など）は軽い方の値で数える
+const MODEL_PRICES = Object.freeze({
+  'gemini-3.5-flash-lite': { input: 0.54, output: 4.5 },
+  'gemini-3.5-flash': { input: 1.5, output: 9 },
+});
+const FALLBACK_PRICE = MODEL_PRICES['gemini-3.5-flash-lite'];
+// Google 検索は月 5000 回まで無料、そのあと 1000 回で 14 ドル
+const SEARCH_FREE_PER_MONTH = 5000;
+const SEARCH_USD_PER_1000 = 14;
+// 円に直すときの目安。為替で変わるので、画面では「約」を付けて出す
+const YEN_PER_USD = 150;
+
+/**
+ * ある月（2026-09 の形）の合計と、料金の目安を返す。無料枠のキーならお金はかからない
+ * @param {{ days: object }} log
+ * @param {string} month
+ */
+function monthUsage(log, month) {
+  const total = { ...emptyCounts(), usd: 0 };
+  for (const [date, models] of Object.entries(log.days)) {
+    if (!date.startsWith(`${month}-`)) continue;
+    for (const [model, raw] of Object.entries(models ?? {})) {
+      const counts = { ...emptyCounts(), ...raw };
+      for (const key of Object.keys(emptyCounts())) total[key] += Number(counts[key]) || 0;
+      const price = MODEL_PRICES[model] ?? FALLBACK_PRICE;
+      total.usd += ((Number(counts.prompt) || 0) * price.input + ((Number(counts.output) || 0) + (Number(counts.thoughts) || 0)) * price.output) / 1e6;
+    }
+  }
+  total.usd += (Math.max(0, total.searches - SEARCH_FREE_PER_MONTH) * SEARCH_USD_PER_1000) / 1000;
+  total.yen = Math.round(total.usd * YEN_PER_USD);
+  return total;
+}
+
 function emptyCounts() {
   return { requests: 0, prompt: 0, output: 0, thoughts: 0, searches: 0 };
 }
@@ -89,4 +123,4 @@ class TokenLog {
   }
 }
 
-module.exports = { TokenLog, addUsage, normalizeLog, TOKEN_LOG_KEEP_DAYS, UNKNOWN_MODEL };
+module.exports = { TokenLog, addUsage, normalizeLog, monthUsage, TOKEN_LOG_KEEP_DAYS, UNKNOWN_MODEL, YEN_PER_USD, SEARCH_FREE_PER_MONTH };

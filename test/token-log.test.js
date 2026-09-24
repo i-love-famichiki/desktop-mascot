@@ -7,7 +7,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { TokenLog, addUsage, normalizeLog, TOKEN_LOG_KEEP_DAYS, UNKNOWN_MODEL } = require('../token-log');
+const { TokenLog, addUsage, normalizeLog, monthUsage, TOKEN_LOG_KEEP_DAYS, UNKNOWN_MODEL } = require('../token-log');
 
 const usage = (prompt, output, thoughts) => ({ promptTokenCount: prompt, candidatesTokenCount: output, thoughtsTokenCount: thoughts });
 
@@ -61,4 +61,27 @@ test('ファイルに書いて、立ち上げ直しても数え続ける。壊�
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('月の合計: その月の日だけを足し、モデルごとの値段で料金の目安を出す', () => {
+  const log = {
+    days: {
+      '2026-08-31': { 'gemini-3.5-flash-lite': { requests: 9, prompt: 9e6, output: 0, thoughts: 0, searches: 0 } },
+      '2026-09-01': { 'gemini-3.5-flash-lite': { requests: 2, prompt: 1e6, output: 1e6, thoughts: 0, searches: 1 } },
+      '2026-09-02': { 'gemini-3.5-flash': { requests: 1, prompt: 1e6, output: 0, thoughts: 1e6, searches: 0 } },
+    },
+  };
+  const total = monthUsage(log, '2026-09');
+  assert.equal(total.requests, 3);
+  assert.equal(total.searches, 1);
+  // lite: 0.54 + 4.5、flash: 1.5 + 考えた分 9（出力の値段）
+  assert.equal(Math.round(total.usd * 100) / 100, 15.54);
+  assert.equal(total.yen, Math.round(total.usd * 150));
+});
+
+test('月の合計: 検索は月5000回まで無料。知らないモデルは軽い方の値段で数える', () => {
+  const log = { days: { '2026-09-01': { [UNKNOWN_MODEL]: { requests: 6000, prompt: 1e6, output: 0, thoughts: 0, searches: 6000 } } } };
+  const total = monthUsage(log, '2026-09');
+  assert.equal(Math.round(total.usd * 100) / 100, Math.round((0.54 + 14) * 100) / 100);
+  assert.deepEqual(monthUsage(log, '2026-10'), { requests: 0, prompt: 0, output: 0, thoughts: 0, searches: 0, usd: 0, yen: 0 });
 });

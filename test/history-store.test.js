@@ -266,3 +266,45 @@ test('共有: 保存先を移すと、移した先にあった履歴と混ざる
   reloaded.load();
   assert.deepEqual(reloaded.messages.map((m) => m.content), ['ほかの PC の話', 'この PC の話']);
 });
+
+// 「昔の会話を覚える」を切っている間の発言（isEphemeral）。保存は今の時刻で捨てるので、時刻は今から数える
+test('覚えない設定: 切った後の昨日より前の発言だけを捨て、切る前の発言と今日の発言は残す', async () => {
+  const now = Date.now();
+  const startOfToday = new Date(now).setHours(0, 0, 0, 0);
+  const DAY = 24 * 60 * 60 * 1000;
+  const offAt = startOfToday - 2 * DAY;
+  const store = new HistoryStore(tempFile());
+  store.isEphemeral = (message) => message.at >= offAt;
+  store.messages = [
+    say('user', '切る前の話', offAt - 60000),
+    say('user', '切った後の昨日の話', startOfToday - 60000),
+    say('user', '今日の話', startOfToday + 60000),
+  ];
+  assert.equal(store.dropStaleEphemeral(now), 1);
+  assert.deepEqual(store.messages.map((m) => m.content), ['切る前の話', '今日の話']);
+});
+
+test('覚えない設定: ほかの PC の分と混ぜて戻ってきても、保存のときに捨て直す', async () => {
+  const file = tempFile();
+  const yesterday = new Date().setHours(0, 0, 0, 0) - 60000;
+  const other = new HistoryStore(file);
+  await other.append(say('user', '昨日の話', yesterday));
+
+  const store = new HistoryStore(file);
+  store.isEphemeral = () => true;
+  await store.append(say('user', '今の話', Date.now()));
+
+  const reloaded = new HistoryStore(file);
+  reloaded.load();
+  assert.deepEqual(reloaded.messages.map((m) => m.content), ['今の話']);
+});
+
+test('覚えない設定: リセットしても、切った後の発言は保管庫に入れない', async () => {
+  const file = tempFile();
+  const store = new HistoryStore(file);
+  store.isEphemeral = (message) => message.content !== '切る前の話';
+  store.messages = [say('user', '切る前の話', at(9, 15, 9)), say('user', '切った後の話', at(9, 15, 10))];
+  await store.clear();
+  const archived = await store.archive.readRange();
+  assert.deepEqual(archived.map((m) => m.content), ['切る前の話']);
+});

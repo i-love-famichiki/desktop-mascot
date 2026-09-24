@@ -116,6 +116,21 @@ class HistoryStore {
     this.saving = Promise.resolve();
     // ファイルはあるのに読めなかったときは、空の履歴で上書きしないよう保存を止める
     this.saveDisabled = false;
+    // 昔の会話として残さない発言か（設定の「昔の会話を覚える」を切っている間の発言。main.js が決める）。
+    // こうした発言は保管庫に入れず、日付が変わったら要約もせずに捨てる
+    this.isEphemeral = () => false;
+  }
+
+  /**
+   * 残さない発言のうち、今日より前のものを捨てる（保存はしない）。
+   * @param {number} [now] テスト用に日時を差し替えられる
+   * @returns {number} 捨てた数
+   */
+  dropStaleEphemeral(now = Date.now()) {
+    const startOfToday = new Date(now).setHours(0, 0, 0, 0);
+    const before = this.messages.length;
+    this.messages = this.messages.filter((message) => message.at >= startOfToday || !this.isEphemeral(message));
+    return before - this.messages.length;
   }
 
   /** ファイルから読み込む。無ければ空で始める。壊れていたら退避して空で始める */
@@ -194,7 +209,7 @@ class HistoryStore {
     // ほかの PC でリセット・要約されて、ここで初めて消える発言も保管庫に残す
     // （要約した PC が保管庫に入れていれば、同じ発言は1つにまとまる）
     const kept = new Set(merged.messages);
-    const dropped = this.messages.filter((message) => !kept.has(message));
+    const dropped = this.messages.filter((message) => !kept.has(message) && !this.isEphemeral(message));
     if (dropped.length > 0) {
       this.archive.add(dropped).catch((err) => console.error('[history] 消える発言を保管庫に残せませんでした:', err.message));
     }
@@ -212,7 +227,7 @@ class HistoryStore {
    * 保管庫に書けなかったときは、何も消さずに例外にする
    */
   async clear() {
-    await this.archive.add(this.messages);
+    await this.archive.add(this.messages.filter((message) => !this.isEphemeral(message)));
     this.messages = [];
     this.summaries = [];
     this.clearedAt = Date.now();
@@ -235,6 +250,8 @@ class HistoryStore {
         }
       }
       if (remote) this.applyMerge(remote);
+      // ファイルにあった分（ほかの PC が書いた分も）から戻ってきても、ここで捨て直す
+      this.dropStaleEphemeral();
 
       const json = JSON.stringify(
         { version: 1, messages: this.messages, summaries: this.summaries, clearedAt: this.clearedAt },

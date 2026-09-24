@@ -29,7 +29,8 @@ const {
 } = require('./appraisal');
 const { soundChoices, SOUND_VOLUMES, AUDIO_EXTENSIONS, SoundError, importSoundFile, playable, volumeById } = require('./sounds');
 const { createSseParser } = require('./sse');
-const { TokenLog } = require('./token-log');
+const { TokenLog, monthUsage, SEARCH_FREE_PER_MONTH } = require('./token-log');
+const { ApiKeyStore, SAVED_SOURCE, DEFAULT_SOURCE } = require('./api-key');
 const { toolGroups: chatToolGroups } = require('./chat-tools');
 const { parseCompressCommand, compressImages, describeResult } = require('./image-compress');
 const { GoogleAuth, GoogleAuthError } = require('./google-auth');
@@ -63,7 +64,7 @@ if (!app.requestSingleInstanceLock()) {
   return;
 }
 
-// Gemini API で返事をもらう。キーは環境変数 GEMINI_API_KEY から読む。
+// Gemini API で返事をもらう。キーは設定で選んだ環境変数か、設定画面で入れたもの（api-key.js）。
 // どのモデルを使うかは設定で選ぶ（settings.geminiModel、選択肢は settings.js の GEMINI_MODELS）
 function currentModel() {
   return GEMINI_MODELS.find((model) => model.id === settings.geminiModel) ?? GEMINI_MODELS[0];
@@ -75,7 +76,9 @@ function geminiEndpoint(stream) {
   return stream ? `${base}:streamGenerateContent?alt=sse` : `${base}:generateContent`;
 }
 
-const GEMINI_TIMEOUT_MS = 30 * 1000;
+// 無料枠のキーは後回しにされるようで、検索なしでも 20〜30 秒かかった（2026-09-24 に測定。有料枠は 1 秒前後）。
+// 30 秒だとときどき時間切れになったので、60 秒まで待つ
+const GEMINI_TIMEOUT_MS = 60 * 1000;
 
 // 吹き出しに添える出典の数の上限（小さい吹き出しなので少なめに）
 const SOURCES_MAX = 3;
@@ -102,14 +105,20 @@ const SUMMARY_PROMPT = [
 // 天気やニュースは Google 検索（tools の google_search）で調べられるので、
 // 検索するかどうかはモデル自身に判断させる。
 // 日付は話しかけるたびに入れ直す（モデルは今日が何日か知らない）。
-function buildSystemPrompt(groups = { timer: true, history: true, calendar: calendarInChat(), pastDays: true }, appraisal = null) {
+function buildSystemPrompt(
+  groups = { timer: true, history: true, calendar: calendarInChat(), pastDays: true },
+  appraisal = null,
+  search = settings.webSearch ? 'on' : 'off',
+) {
+  // 昔の会話を覚えない設定のときは、昔の会話探しも昨日より前の会話も渡さない
+  if (!settings.keepPast) groups = { ...groups, history: false, pastDays: false };
   const now = new Date().toLocaleString('ja-JP', { dateStyle: 'full', timeStyle: 'short' });
   return [
     'あなたはユーザーのデスクトップに住んでいるマスコットです。',
     '見た目はマスコットですが、中身は物知りな AI アシスタントです。',
     '漢字、言葉、料理、勉強、プログラミングなど、一般的な知識で答えられることは遠慮なく教えてください。',
     '「ぼくはマスコットだから」「食べたことがないから」などを理由に、知っていることを分からないと言ってはいけません。',
-    '天気、ニュース、最近の出来事など新しい情報が必要なときは、Google 検索で調べてから答えてください。',
+    ...searchPromptLines(search),
     '場所によって答えが変わる質問（天気など）で場所が分からないときは、短く聞き返してください。',
     `現在の日時は ${now}（ISO 8601 では ${localIsoString(Date.now())}）です。`,
     ...elapsedPromptLines(),
@@ -136,8 +145,8 @@ function buildSystemPrompt(groups = { timer: true, history: true, calendar: cale
           '見つからなかったときは、覚えていないと正直に答えてください。見つからない話を作ってはいけません。',
         ]
       : []),
-    ...(groups.pastDays ? pastDaysPromptLines() : PAST_DAYS_IDLE_LINES),
-    ...memoryPromptLines(),
+    ...(!settings.keepPast ? NO_PAST_LINES : groups.pastDays ? pastDaysPromptLines() : PAST_DAYS_IDLE_LINES),
+    ...(settings.keepPast ? memoryPromptLines() : []),
     // 口調の指示は一番最後に置く。中の「絶対的NGライン」が、ほかの指示に上書きされにくいようにするため
     // （1番目のプリセットのときは何も足さないので、今までと同じプロンプトになる）
     // 感情の評価をした回は、毒舌強度をその回の値に差し替えて渡す（刺す理由がなければ 0）。
@@ -192,6 +201,26 @@ const PAST_DAYS_IDLE_LINES = Object.freeze([
   '昨日より前の会話は、この回は渡していません。前に話したことを持ち出されて分からないときは、知ったかぶりせず短く聞き返してください。',
 ]);
 
+// 検索についての指示。'refused' は、検索つきで頼んだら断られて、検索なしでやり直している回
+function searchPromptLines(search) {
+  if (search === 'on') return ['天気、ニュース、最近の出来事など新しい情報が必要なときは、Google 検索で調べてから答えてください。'];
+  if (search === 'refused') {
+    return [
+      '今回は Google 検索が使えませんでした（無料枠のキーでは、検索は断られます）。天気、ニュース、最近の出来事など新しい情報が必要なときは、調べられなかったことを短く伝えてください（無料枠のキーなら検索は使えないことも、ひとこと添えてください）。古い知識で言い切ってはいけません。そういう質問でないときは、検索できないことに触れないでください。',
+    ];
+  }
+  return [
+    '今は Google 検索を使えない設定です。天気、ニュース、最近の出来事など新しい情報が必要なときは、設定で検索を切ってあるので調べられないことと、設定の「KEY」タブで「Google 検索を使う」を入れれば調べられることを、短く伝えてください（無料枠のキーでは検索が使えないことも、ひとこと添えてください）。古い知識で言い切ってはいけません。そういう質問でないときは、検索できないことに触れないでください。',
+  ];
+}
+
+// 設定で昔の会話を覚えないようにしているときの1行
+const NO_PAST_LINES = Object.freeze([
+  '',
+  '昨日より前の会話は覚えない設定になっています。今日の会話（下にあるもの）は覚えているので、そこに出てきたことは普通に使ってください。',
+  '今日の会話に無い、前に話したことを持ち出されたときだけ、覚えていないと短く伝えてください。',
+]);
+
 // 7日より前の会話は要約だけが残っている。話題に関係があるときだけ使ってもらう
 function memoryPromptLines() {
   const summaries = store.summariesForPrompt();
@@ -235,6 +264,8 @@ function historyFilePath() {
 // 会話履歴はメインプロセスだけが持ち、history.json に保存する（終了しても消えない）。
 // テストのときは環境変数 MASCOT_HISTORY_FILE で保存先を差し替えられる。
 const store = new HistoryStore(historyFilePath());
+// 「昔の会話を覚える」を切った後の発言は、保管庫に入れず、日付が変わったら捨てる
+store.isEphemeral = (message) => !settings.keepPast && message.at >= settings.keepPastOffAt;
 
 // リマインダーの保存先。ほかの PC と一緒に知らせないよう、共有中でもこの PC の中に置く。
 // テストのときは MASCOT_REMINDER_FILE で差し替えられる
@@ -255,6 +286,13 @@ const googleAuth = new GoogleAuth({
   tokenFile: path.join(googleDir, 'google-token.json'),
   fetch: (...args) => net.fetch(...args),
   openExternal: (url) => shell.openExternal(url),
+  safeStorage,
+});
+// Gemini の API キー。設定画面で入れたキーは、この PC の中に暗号化して置く（共有フォルダには置かない）。
+// テストのときは MASCOT_API_KEY_FILE で差し替えられる
+const apiKeys = new ApiKeyStore({
+  file: process.env.MASCOT_API_KEY_FILE ? path.resolve(process.env.MASCOT_API_KEY_FILE) : path.join(dataDir, 'gemini-key.json'),
+  env: process.env,
   safeStorage,
 });
 const calendar = new Calendar({ auth: googleAuth, fetch: (...args) => net.fetch(...args) });
@@ -590,6 +628,10 @@ function settingsState() {
     },
     look: { id: settings.mascotLook, choices: [...MASCOT_LOOKS] },
     model: { id: settings.geminiModel, choices: GEMINI_MODELS.map(({ id, name }) => ({ id, name })) },
+    webSearch: settings.webSearch,
+    keepPast: settings.keepPast,
+    apiKey: apiKeyState(),
+    usage: usageState(),
     tone: {
       index: settings.tonePresetIndex,
       presets: settings.tonePresets.map((preset) => ({ name: preset.name, axes: { ...preset.axes } })),
@@ -770,6 +812,112 @@ ipcMain.handle('settings:set-mascot-look', (event, id) => {
 ipcMain.handle('settings:set-model', (event, id) => {
   if (fromSettingsWindow(event) && GEMINI_MODELS.some((model) => model.id === id)) {
     settings = { ...settings, geminiModel: id };
+    saveSettings(settingsFile, settings);
+    notifySettingsChanged();
+  }
+  return settingsState();
+});
+
+/**
+ * 設定画面に出す API キーの状態。キーそのものは渡さず、最後の4文字だけ見せる。
+ * 環境変数から読むか、画面で貼ったキーを使うか、どちらか1つ（mode）
+ */
+function apiKeyState() {
+  const envName = ApiKeyStore.envName(settings.apiKeySource) || ApiKeyStore.envName(DEFAULT_SOURCE);
+  return {
+    mode: settings.apiKeySource === SAVED_SOURCE ? 'saved' : 'env',
+    envName,
+    envHint: apiKeys.hint(`env:${envName}`),
+    suggestions: apiKeys.envNames(),
+    savedHint: apiKeys.hint(SAVED_SOURCE),
+  };
+}
+
+/** 今月と今日の使った量、料金の目安（token-log.js） */
+function usageState() {
+  const log = tokenLog.load();
+  const today = localDateKey(Date.now());
+  const month = monthUsage(log, today.slice(0, 7));
+  const todayRequests = Object.values(log.days[today] ?? {}).reduce((sum, counts) => sum + (Number(counts.requests) || 0), 0);
+  return {
+    month: `${Number(today.slice(5, 7))}月`,
+    requests: month.requests,
+    searches: month.searches,
+    searchFree: SEARCH_FREE_PER_MONTH,
+    yen: month.yen,
+    todayRequests,
+  };
+}
+
+// 使う API キーを選ぶ。次に話しかけるときから効く
+ipcMain.handle('settings:set-api-key-source', (event, id) => {
+  // 環境変数は名前の形だけ見る（まだ無い名前でも選べる。画面で「見つからない」と出す）。貼ったキーは保存してあるときだけ
+  const valid = id === SAVED_SOURCE ? Boolean(apiKeys.saved) : Boolean(ApiKeyStore.envName(id));
+  if (fromSettingsWindow(event) && valid) {
+    settings = { ...settings, apiKeySource: id };
+    saveSettings(settingsFile, settings);
+    notifySettingsChanged();
+  }
+  return settingsState();
+});
+
+// 設定画面で入れたキーを、使えるか Google に確かめてから保存する（モデルの情報を聞くだけなので料金はかからない）
+ipcMain.handle('settings:save-api-key', async (event, key) => {
+  if (!fromSettingsWindow(event)) return { ok: false, message: '' };
+  const text = String(key ?? '').trim();
+  if (!text) return { ok: false, message: 'キーが空です。' };
+  let checked = true;
+  try {
+    const res = await net.fetch(`https://generativelanguage.googleapis.com/v1beta/models/${currentModel().id}`, {
+      headers: { 'x-goog-api-key': text },
+      signal: AbortSignal.timeout(15000),
+    });
+    if (res.status === 400 || res.status === 401 || res.status === 403) {
+      return { ok: false, message: 'このキーは使えないみたいです。コピーし直して、もう一度入れてください。' };
+    }
+    checked = res.ok;
+  } catch {
+    checked = false;
+  }
+  try {
+    apiKeys.save(text);
+  } catch (err) {
+    return { ok: false, message: `保存できませんでした: ${err.message}` };
+  }
+  settings = { ...settings, apiKeySource: SAVED_SOURCE };
+  saveSettings(settingsFile, settings);
+  notifySettingsChanged();
+  return {
+    ok: true,
+    message: checked ? '保存しました。このキーを使います。' : '保存しました。ただ、つながらなくて使えるかは確かめられませんでした。',
+  };
+});
+
+// 設定画面で入れたキーを消す。それを使っていたら、環境変数 GEMINI_API_KEY に戻す
+ipcMain.handle('settings:clear-api-key', (event) => {
+  if (fromSettingsWindow(event)) {
+    apiKeys.clear();
+    if (settings.apiKeySource === SAVED_SOURCE) settings = { ...settings, apiKeySource: DEFAULT_SOURCE };
+    saveSettings(settingsFile, settings);
+    notifySettingsChanged();
+  }
+  return settingsState();
+});
+
+// 昨日より前の会話を残して使うか。切る前にためた分は消さない（戻せばまた使う）
+ipcMain.handle('settings:set-keep-past', (event, enabled) => {
+  if (fromSettingsWindow(event) && typeof enabled === 'boolean' && enabled !== settings.keepPast) {
+    settings = { ...settings, keepPast: enabled, keepPastOffAt: enabled ? 0 : Date.now() };
+    saveSettings(settingsFile, settings);
+    notifySettingsChanged();
+  }
+  return settingsState();
+});
+
+// 会話で Google 検索を使うか。次に話しかけるときから効く
+ipcMain.handle('settings:set-web-search', (event, enabled) => {
+  if (fromSettingsWindow(event) && typeof enabled === 'boolean') {
+    settings = { ...settings, webSearch: enabled };
     saveSettings(settingsFile, settings);
     notifySettingsChanged();
   }
@@ -1010,7 +1158,9 @@ async function confirmReset() {
     cancelId: 1,
     title: '会話をリセット',
     message: '会話の履歴と、古い会話の要約をすべて消します。',
-    detail: 'マスコットは今までの話を覚えていない状態に戻ります。話した中身は保管庫に残るので、「前にこんな話したっけ？」と聞けば探せます。',
+    detail: settings.keepPast
+      ? 'マスコットは今までの話を覚えていない状態に戻ります。話した中身は保管庫に残るので、「前にこんな話したっけ？」と聞けば探せます。'
+      : 'マスコットは今までの話を覚えていない状態に戻ります。「昔の会話を覚える」を切っているので、切った後に話した中身は保管庫にも残しません。',
   };
   // 自動起動の待ち時間中はまだウィンドウが無いので、トレイから押されたら単独で出す
   const { response } = await showDialog(options);
@@ -1033,6 +1183,7 @@ app.whenReady().then(async () => {
   watchSharedHistory();
   reminders.load();
   googleAuth.load();
+  apiKeys.load();
   setInterval(checkReminders, REMINDER_CHECK_INTERVAL_MS);
   try {
     createTray();
@@ -1050,6 +1201,11 @@ app.whenReady().then(async () => {
   if (!win) createWindow();
   console.log('[startup] マスコットを表示しました');
 
+  // 昔の会話を覚えない設定のときは、要約せず（Gemini も呼ばず）、切った後の昨日より前の発言を捨てるだけ
+  if (!settings.keepPast) {
+    if (store.dropStaleEphemeral() > 0) store.save().catch(() => {});
+    return;
+  }
   // 7日より前の会話の要約は、起動時に1回だけ行う。終わるのを待たずに会話できる
   store.compact(summarizeDay).then(({ summarizedDays, failedDay }) => {
     if (summarizedDays.length) console.log('[history] 要約しました:', summarizedDays.join(', '));
@@ -1192,12 +1348,14 @@ const FOLLOW_UP_MS = 10 * 60 * 1000;
 /** この発言で渡す道具の組み合わせ（中身は chat-tools.js） */
 function toolGroups(userText) {
   const previous = store.messages.findLast((message) => message.role === 'user');
-  return chatToolGroups(userText, {
+  const groups = chatToolGroups(userText, {
     // 登録中のタイマーがあるときは、取り消しや問い合わせに答えられるよう必ず渡す
     hasReminders: reminders.items.length > 0,
     calendarInChat: calendarInChat(),
     previousText: previous && Date.now() - previous.at < FOLLOW_UP_MS ? previous.content : '',
   });
+  // 昔の会話を覚えない設定のときは、保管庫を探す道具も渡さない
+  return settings.keepPast ? groups : { ...groups, history: false, pastDays: false };
 }
 
 // 会話で Gemini に渡す道具（タイマーとリマインダー、昔の会話探し）
@@ -1744,6 +1902,8 @@ async function chat(userText, onDelta) {
     const { text, sources, searchSuggestions } = await askGemini(buildContents(store.messages, userText), {
       onDelta,
       systemPrompt: buildSystemPrompt(groups, appraisal),
+      tools: settings.webSearch ? [{ google_search: {} }] : [],
+      searchRefusedPrompt: () => buildSystemPrompt(groups, appraisal, 'refused'),
       functions: chatFunctions(groups),
     });
     if (appraisal && !appraisal.failed) recordMood(appraisal);
@@ -1882,12 +2042,14 @@ async function askGemini(
     onDelta = null,
     functions = null,
     schema = null,
+    // 検索つきの1回目が 429 で断られたとき、検索なしでやり直すための指示文を返す関数（会話だけで使う）
+    searchRefusedPrompt = null,
   } = {},
 ) {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new GeminiError('no-key', 'GEMINI_API_KEY が設定されていません');
+  const apiKey = apiKeys.get(settings.apiKeySource);
+  if (!apiKey) throw new GeminiError('no-key', `API キーが見つかりません（${settings.apiKeySource}）`);
 
-  const allTools = functions ? [...tools, { functionDeclarations: functions.declarations }] : tools;
+  let allTools = functions ? [...tools, { functionDeclarations: functions.declarations }] : tools;
   if (DEBUG_TOKENS) logPromptParts(systemPrompt, contents);
   const texts = [];
   let finishReason;
@@ -1896,14 +2058,29 @@ async function askGemini(
   const config = generationConfig(schema);
 
   for (let round = 1; ; round++) {
-    const chunks = await requestGemini(apiKey, {
-      systemInstruction: { parts: [{ text: systemPrompt }] },
-      contents,
-      ...(allTools.length > 0 && { tools: allTools }),
-      // Google 検索と自作の道具を一緒に渡すときは、この指定が要る
-      ...(functions && tools.length > 0 && { toolConfig: { includeServerSideToolInvocations: true } }),
-      ...(config && { generationConfig: config }),
-    }, onDelta);
+    let chunks;
+    try {
+      chunks = await requestGemini(apiKey, {
+        systemInstruction: { parts: [{ text: systemPrompt }] },
+        contents,
+        ...(allTools.length > 0 && { tools: allTools }),
+        // Google 検索と自作の道具を一緒に渡すときは、この指定が要る
+        ...(functions && tools.length > 0 && { toolConfig: { includeServerSideToolInvocations: true } }),
+        ...(config && { generationConfig: config }),
+      }, onDelta);
+    } catch (err) {
+      // 無料枠のキーは、検索つきだと毎回 429 で断られる（断られるのは 0.4 秒ほどで、すぐ分かる）。
+      // 1回目なら道具はまだ何も動かしていないので、検索だけ外してやり直しても二重にならない
+      const searching = tools.some((tool) => tool.google_search);
+      if (!(err instanceof GeminiError && err.kind === 'rate-limit' && round === 1 && searching && searchRefusedPrompt)) throw err;
+      console.warn('[gemini] 検索つきで断られたので、検索なしでやり直します');
+      tools = tools.filter((tool) => !tool.google_search);
+      allTools = functions ? [...tools, { functionDeclarations: functions.declarations }] : tools;
+      systemPrompt = searchRefusedPrompt();
+      searchRefusedPrompt = null;
+      round -= 1;
+      continue;
+    }
 
     logTokens(chunks);
 
@@ -2085,11 +2262,14 @@ function describeError(err) {
   console.error('[gemini]', err.message);
   switch (err instanceof GeminiError && err.kind) {
     case 'no-key':
-      return 'APIキーが見つからないみたい。GEMINI_API_KEY を設定してね。';
+      return 'APIキーが見つからないみたい。設定の「KEY」タブで、キーを選ぶか入れてね。';
     case 'bad-key':
-      return 'APIキーが正しくないみたい。GEMINI_API_KEY を確かめてね。';
+      return 'APIキーが正しくないみたい。設定の「KEY」タブで、キーを確かめてね。';
     case 'rate-limit':
-      return '喋りすぎたか、検索の利用上限に達したかもしれない。少し待ってからまた話しかけて。';
+      // 無料枠のキーでは、検索つきの呼び出しが毎回ここに来る
+      return settings.webSearch
+        ? '喋りすぎたか、検索の利用上限に達したかもしれない。少し待ってからまた話しかけて。無料枠のキーなら、設定で「Google 検索を使う」を切ると話せるよ。'
+        : '喋りすぎたみたい。少し待ってからまた話しかけて。';
     case 'blocked':
       return 'ごめん、その話にはうまく答えられないみたい。';
     case 'network':
