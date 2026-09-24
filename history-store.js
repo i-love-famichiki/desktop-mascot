@@ -25,9 +25,10 @@ const { ArchiveStore, dateKey } = require('./archive-store');
 // 7日ぶん残していたときは、5〜6日前の会話だけで毎回の入力の枠を食いつぶしていた
 // （実測: 9/16 の1日で1,973字。昨日は169字）。詳しい中身が要るときは search_history で探せる
 const RETAIN_DAYS = 2;
-// システムプロンプトに入れる要約の上限。毎回送るので短めにしておく
+// システムプロンプトに入れる要約の上限。毎回送るので短めにしておく。
+// 1日ぶんは 70〜80 字ほどなので、1000 字でおよそ 2 週間ぶん。それより前は search_history で探す
 const PROMPT_SUMMARIES_MAX = 30;
-const PROMPT_SUMMARIES_MAX_CHARS = 2000;
+const PROMPT_SUMMARIES_MAX_CHARS = 1000;
 // 昨日の詳しい会話も、新しいものから合計この文字数まで返事に使う。
 // 1回の発言が長すぎると枠を使い切ってしまうので、1発言ごとにも短く切る。
 // 毎回まるごと送るので、ここが入力の値段をいちばん左右する（実測: 4000 字で1回あたり

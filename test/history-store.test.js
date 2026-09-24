@@ -155,11 +155,11 @@ test('システムプロンプト用の要約は、新しいものから30件ま
   assert.match(lines.at(-1), /まとめ40$/);
 });
 
-test('システムプロンプト用の要約は、全体で2000文字を超えない', () => {
+test('システムプロンプト用の要約は、全体で1000文字を超えない', () => {
   const store = new HistoryStore(tempFile());
   store.summaries = Array.from({ length: 30 }, (_, i) => ({ date: `2026-08-${i + 1}`, summary: 'あ'.repeat(140) }));
   const text = store.summariesForPrompt();
-  assert.ok(text.length <= 2000 + 30, `長さ ${text.length}`);
+  assert.ok(text.length <= 1000 + 30, `長さ ${text.length}`);
   assert.ok(text.split('\n').length < 30);
 });
 
