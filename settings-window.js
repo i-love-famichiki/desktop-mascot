@@ -82,7 +82,8 @@ function render(state) {
   const { usage } = state;
   usageSummaryEl.textContent =
     `${usage.month}: ${usage.requests.toLocaleString()} 回（今日 ${usage.todayRequests.toLocaleString()} 回）` +
-    `・検索 ${usage.searches.toLocaleString()} 回（月 ${usage.searchFree.toLocaleString()} 回まで無料）・料金の目安 約 ${usage.yen.toLocaleString()} 円`;
+    `・検索 ${usage.searches.toLocaleString()} 回（月 ${usage.searchFree.toLocaleString()} 回まで無料）\n` +
+    `トークン ${(usage.sentTokens + usage.replyTokens).toLocaleString()}（送った分 ${usage.sentTokens.toLocaleString()}・返事 ${usage.replyTokens.toLocaleString()}）`;
 
   renderSound(state.sound);
   renderTone(state.tone);

@@ -833,7 +833,7 @@ function apiKeyState() {
   };
 }
 
-/** 今月と今日の使った量、料金の目安（token-log.js） */
+/** 今月と今日の使った量（token-log.js） */
 function usageState() {
   const log = tokenLog.load();
   const today = localDateKey(Date.now());
@@ -844,7 +844,9 @@ function usageState() {
     requests: month.requests,
     searches: month.searches,
     searchFree: SEARCH_FREE_PER_MONTH,
-    yen: month.yen,
+    // 送った分（prompt）と、返ってきた分（返事 output と考えた分 thoughts）
+    sentTokens: month.prompt,
+    replyTokens: month.output + month.thoughts,
     todayRequests,
   };
 }

@@ -123,6 +123,11 @@
         word-break: break-all;
       }
 
+      /* 回数とトークンを2行に分けて出す */
+      #usage-summary {
+        white-space: pre-line;
+      }
+
       .status.on {
         color: var(--accent);
         font-weight: bold;
@@ -468,8 +473,8 @@
         <h2>使った量</h2>
         <div id="usage-summary" class="status"></div>
         <div class="note">
-          料金は、有料枠の値段で数えた目安です（1 ドル 150 円で計算）。無料枠のキーなら、お金はかかりません。
-          正しい金額は Google Cloud の請求の画面で確かめてください。
+          トークンは、AI が読み書きした文字の量の単位です。「返事」には、返事の前に AI が考えた分も入ります。
+          無料枠のキーならお金はかかりません。有料枠の金額は Google Cloud の請求の画面で確かめてください。
         </div>
       </section>
     </div>
