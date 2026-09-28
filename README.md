@@ -11,6 +11,16 @@ Gemini が吹き出しで返事をします。Windows 用・Electron 製。
 > このアプリは、AI の [Claude](https://claude.com/claude-code)（Claude Code）と一緒に作りました。
 > 使ったことで起きた問題や損害について、作者は責任を負いません。ご自分の判断でお使いください。
 
+## ダウンロード
+
+[Releases のページ](https://github.com/i-love-famichiki/desktop-mascot/releases/latest)の「Assets」から
+`DesktopMascot-Setup.exe` をダウンロードして、ダブルクリックでインストールします（Windows 10 / 11、64 ビット版）。
+
+- 青い「Windows によって PC が保護されました」が出たら、「詳細情報」→「実行」で進めます
+  （個人で作ったアプリなので、発行元の証明が付いていないため出ます）
+- 使うには、自分の Gemini API キーが要ります（[Google AI Studio](https://aistudio.google.com/) で作れます）
+- 詳しい手順は、同じ「Assets」にある `manual.html`（マニュアル）をダウンロードして、ブラウザで開いてください
+
 ## できること
 
 **会話**
