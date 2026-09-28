@@ -66,7 +66,7 @@ async function chooseShareFolder() {
     type: 'info',
     title: '会話の共有を始めました',
     message: `会話を「${folder}」に保存します。`,
-    detail: 'ほかの PC でも、右クリックメニューの「ほかの PC と会話を共有」から、同じフォルダを選んでください。',
+    detail: 'ほかの PC でも、右クリックメニューの「設定を開く…」→「ほかの PC と会話を共有」から、同じフォルダを選んでください。',
   });
 }
 
