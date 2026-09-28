@@ -15,7 +15,7 @@ const {
   readJpegOrientation,
   withOrientation,
   describeResult,
-} = require('../image-compress');
+} = require('../lib/image-compress');
 
 test('絶対値の指定を読める（大文字・小文字・全角・MB）', () => {
   assert.deepEqual(parseCompressCommand('500KBにして'), { kind: 'size', bytes: 500 * 1024, label: '500KB以下' });

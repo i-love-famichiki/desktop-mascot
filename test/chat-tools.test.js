@@ -7,7 +7,7 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { toolGroups } = require('../chat-tools');
+const { toolGroups } = require('../lib/chat-tools');
 
 const at = (text, state) => toolGroups(text, state);
 

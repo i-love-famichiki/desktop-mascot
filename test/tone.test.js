@@ -17,7 +17,7 @@ const {
   normalizeTonePresets,
   normalizeTonePresetIndex,
   tonePromptLines,
-} = require('../tone');
+} = require('../lib/tone');
 
 test('つまみは6つ。素直さだけ下限が3', () => {
   assert.deepEqual(TONE_AXES.map((axis) => axis.id), ['sharp', 'academic', 'honest', 'kind', 'cute', 'emotion']);

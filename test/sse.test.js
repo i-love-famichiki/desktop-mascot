@@ -4,7 +4,7 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { createSseParser } = require('../sse');
+const { createSseParser } = require('../lib/sse');
 
 function parseAll(pieces) {
   const events = [];

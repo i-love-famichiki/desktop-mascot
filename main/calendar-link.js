@@ -13,9 +13,9 @@ const state = require('./state');
 const { showDialog } = require('./dialogs');
 const { pushNotice, deliverNotices } = require('./notices');
 const { settingsState, fromSettingsWindow } = require('./settings-panel');
-const { CALENDAR_MODES, CALENDAR_REFRESH_CHOICES } = require('../settings');
-const { parseDay } = require('../archive-store');
-const { GoogleAuthError } = require('../google-auth');
+const { CALENDAR_MODES, CALENDAR_REFRESH_CHOICES } = require('../lib/settings');
+const { parseDay } = require('../lib/archive-store');
+const { GoogleAuthError } = require('../lib/google-auth');
 const {
   CalendarError,
   DAY_MS,
@@ -26,7 +26,7 @@ const {
   eventNoticeText,
   shouldBrief,
   briefingText,
-} = require('../calendar');
+} = require('../lib/calendar');
 
 const EVENT_NOTICE_LEAD_MS = 10 * 60 * 1000;
 // 予定を読み直す間隔は設定で変えられる（settings.calendarRefreshMinutes）。

@@ -14,7 +14,7 @@ const {
   briefingText,
   eventTimes,
   sameLengthEnd,
-} = require('../calendar');
+} = require('../lib/calendar');
 
 // この PC の時刻での日時（テストはどのタイムゾーンでも通るよう、ローカル時刻で作る）
 const at = (y, mo, d, h = 0, mi = 0) => new Date(y, mo - 1, d, h, mi).getTime();

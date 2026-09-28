@@ -8,7 +8,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { ReminderStore, MAX_REMINDERS, LATE_MS } = require('../reminder-store');
+const { ReminderStore, MAX_REMINDERS, LATE_MS } = require('../lib/reminder-store');
 
 // 「今」は 2026-09-17 20:00（ローカル時刻）とする
 const NOW = new Date(2026, 8, 17, 20, 0).getTime();

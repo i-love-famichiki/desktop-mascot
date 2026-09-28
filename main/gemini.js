@@ -5,10 +5,10 @@
 
 const { net } = require('electron');
 const state = require('./state');
-const { GEMINI_MODELS } = require('../settings');
-const { tonePromptLines } = require('../tone');
-const { createSseParser } = require('../sse');
-const { localDateKey } = require('../calendar');
+const { GEMINI_MODELS } = require('../lib/settings');
+const { tonePromptLines } = require('../lib/tone');
+const { createSseParser } = require('../lib/sse');
+const { localDateKey } = require('../lib/calendar');
 
 function currentModel() {
   return GEMINI_MODELS.find((model) => model.id === state.settings.geminiModel) ?? GEMINI_MODELS[0];

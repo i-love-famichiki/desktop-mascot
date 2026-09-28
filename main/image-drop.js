@@ -4,7 +4,7 @@
 
 const { app, ipcMain, nativeImage } = require('electron');
 const path = require('path');
-const { parseCompressCommand, compressImages, describeResult } = require('../image-compress');
+const { parseCompressCommand, compressImages, describeResult } = require('../lib/image-compress');
 
 // 置き場所はいつもデスクトップ。テストのときは MASCOT_OUTPUT_DIR で差し替えられる
 function compressOutputDir() {

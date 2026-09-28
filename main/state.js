@@ -6,14 +6,14 @@
 const { app, net, shell, safeStorage } = require('electron');
 const { EventEmitter } = require('events');
 const path = require('path');
-const { HistoryStore } = require('../history-store');
-const { ReminderStore } = require('../reminder-store');
-const { loadSettings, saveSettings } = require('../settings');
-const { MoodLog } = require('../appraisal');
-const { TokenLog } = require('../token-log');
-const { ApiKeyStore } = require('../api-key');
-const { GoogleAuth } = require('../google-auth');
-const { Calendar } = require('../calendar');
+const { HistoryStore } = require('../lib/history-store');
+const { ReminderStore } = require('../lib/reminder-store');
+const { loadSettings, saveSettings } = require('../lib/settings');
+const { MoodLog } = require('../lib/appraisal');
+const { TokenLog } = require('../lib/token-log');
+const { ApiKeyStore } = require('../lib/api-key');
+const { GoogleAuth } = require('../lib/google-auth');
+const { Calendar } = require('../lib/calendar');
 
 // アプリのファイル（index.html や preload.js）が置いてある所
 const ROOT = path.join(__dirname, '..');

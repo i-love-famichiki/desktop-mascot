@@ -7,7 +7,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { TokenLog, addUsage, normalizeLog, monthUsage, TOKEN_LOG_KEEP_DAYS, UNKNOWN_MODEL } = require('../token-log');
+const { TokenLog, addUsage, normalizeLog, monthUsage, TOKEN_LOG_KEEP_DAYS, UNKNOWN_MODEL } = require('../lib/token-log');
 
 const usage = (prompt, output, thoughts) => ({ promptTokenCount: prompt, candidatesTokenCount: output, thoughtsTokenCount: thoughts });
 

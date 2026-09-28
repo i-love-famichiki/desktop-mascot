@@ -9,12 +9,12 @@ const path = require('path');
 const state = require('./state');
 const { currentModel } = require('./gemini');
 const { showDialog } = require('./dialogs');
-const { CALENDAR_MODES, CALENDAR_REFRESH_CHOICES, MASCOT_LOOKS, GEMINI_MODELS } = require('../settings');
-const { TONE_AXES, TONE_NG_ITEMS, TONE_NAME_MAX_CHARS, PLAIN_TONE_PRESET_INDEX, toneSteps } = require('../tone');
-const { soundChoices, SOUND_VOLUMES } = require('../sounds');
-const { monthUsage, SEARCH_FREE_PER_MONTH } = require('../token-log');
-const { ApiKeyStore, SAVED_SOURCE, DEFAULT_SOURCE } = require('../api-key');
-const { localDateKey } = require('../calendar');
+const { CALENDAR_MODES, CALENDAR_REFRESH_CHOICES, MASCOT_LOOKS, GEMINI_MODELS } = require('../lib/settings');
+const { TONE_AXES, TONE_NG_ITEMS, TONE_NAME_MAX_CHARS, PLAIN_TONE_PRESET_INDEX, toneSteps } = require('../lib/tone');
+const { soundChoices, SOUND_VOLUMES } = require('../lib/sounds');
+const { monthUsage, SEARCH_FREE_PER_MONTH } = require('../lib/token-log');
+const { ApiKeyStore, SAVED_SOURCE, DEFAULT_SOURCE } = require('../lib/api-key');
+const { localDateKey } = require('../lib/calendar');
 
 function openSettingsWindow() {
   // もう開いていたら、新しく開かずに手前に出す
@@ -38,7 +38,7 @@ function openSettingsWindow() {
     show: false,
     autoHideMenuBar: true,
     webPreferences: {
-      preload: path.join(state.ROOT, 'settings-preload.js'),
+      preload: path.join(state.ROOT, 'windows', 'settings-preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -46,7 +46,7 @@ function openSettingsWindow() {
   });
   state.settingsWin = win;
   win.setMenu(null);
-  win.loadFile('settings-window.html');
+  win.loadFile('windows/settings-window.html');
   win.once('ready-to-show', () => state.settingsWin?.show());
   win.on('closed', () => {
     state.settingsWin = null;

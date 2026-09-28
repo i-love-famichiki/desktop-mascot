@@ -8,7 +8,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { ApiKeyStore, SAVED_SOURCE, DEFAULT_SOURCE } = require('../api-key');
+const { ApiKeyStore, SAVED_SOURCE, DEFAULT_SOURCE } = require('../lib/api-key');
 
 const fakeSafeStorage = (available = true) => ({
   isEncryptionAvailable: () => available,

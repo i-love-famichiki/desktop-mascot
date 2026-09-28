@@ -7,8 +7,8 @@ const state = require('./state');
 const { formatMessageTime } = require('./format');
 const { REMINDER_FUNCTION_DECLARATIONS, callReminderFunction } = require('./reminders');
 const { CALENDAR_FUNCTION_DECLARATIONS, CALENDAR_FUNCTION_NAMES, calendarInChat, callCalendarFunction } = require('./calendar-link');
-const { toolGroups: chatToolGroups } = require('../chat-tools');
-const { searchConversations, mergeMessages, parseDay } = require('../archive-store');
+const { toolGroups: chatToolGroups } = require('../lib/chat-tools');
+const { searchConversations, mergeMessages, parseDay } = require('../lib/archive-store');
 
 // この時間より前の発言は、続きの話とは見なさない
 const FOLLOW_UP_MS = 10 * 60 * 1000;

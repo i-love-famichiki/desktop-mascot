@@ -15,8 +15,8 @@ const {
   clampAxisValue,
   normalizeToneName,
   normalizeTonePresetIndex,
-} = require('../tone');
-const { APPRAISAL_SCHEMA, SEVERITY_BASED, judgePromptLines, withSharpness } = require('../appraisal');
+} = require('../lib/tone');
+const { APPRAISAL_SCHEMA, SEVERITY_BASED, judgePromptLines, withSharpness } = require('../lib/appraisal');
 
 /** 6つのつまみを使うプリセットを選んでいるか（1番目は今までの口調そのまま） */
 function usingTonePreset() {

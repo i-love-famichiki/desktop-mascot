@@ -7,8 +7,8 @@ const { describeElapsed, formatMessageTime, localIsoString, clip } = require('./
 const { usingTonePreset, toneChangedToday } = require('./mood');
 const { reminderPromptLines } = require('./reminders');
 const { CALENDAR_IDLE_LINES, calendarInChat, calendarPromptLines, calendarUnavailableLines } = require('./calendar-link');
-const { tonePromptLines } = require('../tone');
-const { emotionPromptLines } = require('../appraisal');
+const { tonePromptLines } = require('../lib/tone');
+const { emotionPromptLines } = require('../lib/appraisal');
 
 // 送る会話履歴の上限（今日の直近20往復まで）。昨日より前の会話は、システムプロンプトに短く入れる
 const HISTORY_MAX_TURNS = 20;

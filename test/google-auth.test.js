@@ -6,7 +6,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const http = require('http');
-const { GoogleAuth, GoogleAuthError, parseClientFile, createPkce, emailFromIdToken } = require('../google-auth');
+const { GoogleAuth, GoogleAuthError, parseClientFile, createPkce, emailFromIdToken } = require('../lib/google-auth');
 
 const CLIENT_JSON = JSON.stringify({ installed: { client_id: 'id-123.apps.googleusercontent.com', client_secret: 'secret-xyz' } });
 

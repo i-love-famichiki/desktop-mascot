@@ -9,7 +9,7 @@ const path = require('path');
 const state = require('./state');
 const { showDialog } = require('./dialogs');
 const { settingsState, fromSettingsWindow } = require('./settings-panel');
-const { soundChoices, SOUND_VOLUMES, AUDIO_EXTENSIONS, SoundError, importSoundFile, playable, volumeById } = require('../sounds');
+const { soundChoices, SOUND_VOLUMES, AUDIO_EXTENSIONS, SoundError, importSoundFile, playable, volumeById } = require('../lib/sounds');
 
 const SOUND_SLOTS = { notify: 'お知らせの音', reply: '返事の音' };
 

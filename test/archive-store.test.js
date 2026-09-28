@@ -8,8 +8,8 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { ArchiveStore, searchConversations, parseDay } = require('../archive-store');
-const { HistoryStore } = require('../history-store');
+const { ArchiveStore, searchConversations, parseDay } = require('../lib/archive-store');
+const { HistoryStore } = require('../lib/history-store');
 
 // 「今」は 2026-09-15 12:00（ローカル時刻）とする
 const NOW = new Date(2026, 8, 15, 12, 0).getTime();

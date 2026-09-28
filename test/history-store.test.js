@@ -9,7 +9,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { HistoryStore, retentionCutoff } = require('../history-store');
+const { HistoryStore, retentionCutoff } = require('../lib/history-store');
 
 // 「今」は 2026-09-15 12:00（ローカル時刻）とする。
 // 直近7日 = 9/9〜9/15 は残し、9/8 以前を要約する

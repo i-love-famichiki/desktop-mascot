@@ -21,8 +21,8 @@ const {
   moodPromptLines,
   emotionPromptLines,
   withSharpness,
-} = require('../appraisal');
-const { TONE_NG_ITEMS } = require('../tone');
+} = require('../lib/appraisal');
+const { TONE_NG_ITEMS } = require('../lib/tone');
 
 const AXES = { sharp: 6, academic: 5, honest: 5, kind: 5, cute: 5, emotion: 5 };
 

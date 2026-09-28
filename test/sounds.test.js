@@ -7,7 +7,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { soundChoices, findSound, isSoundId, isVolumeId, volumeById, safeFileName, importSoundFile, playable, SoundError } = require('../sounds');
+const { soundChoices, findSound, isSoundId, isVolumeId, volumeById, safeFileName, importSoundFile, playable, SoundError } = require('../lib/sounds');
 
 function tempDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'mascot-sounds-'));

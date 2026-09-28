@@ -7,8 +7,8 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { DEFAULT_SETTINGS, CALENDAR_MODES, CALENDAR_REFRESH_CHOICES, MASCOT_LOOKS, GEMINI_MODELS, loadSettings, saveSettings } = require('../settings');
-const { DEFAULT_TONE_PRESETS, normalizeTonePresets } = require('../tone');
+const { DEFAULT_SETTINGS, CALENDAR_MODES, CALENDAR_REFRESH_CHOICES, MASCOT_LOOKS, GEMINI_MODELS, loadSettings, saveSettings } = require('../lib/settings');
+const { DEFAULT_TONE_PRESETS, normalizeTonePresets } = require('../lib/tone');
 
 // 口調のプリセットは長いので、ここでは tone.js の初期値をそのまま使う（中身は test/tone.test.js）
 const tone = () => ({

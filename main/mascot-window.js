@@ -27,7 +27,7 @@ function createWindow() {
     alwaysOnTop: true,
     skipTaskbar: true,
     webPreferences: {
-      preload: path.join(state.ROOT, 'preload.js'),
+      preload: path.join(state.ROOT, 'windows', 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
       // タイマーやリマインダーの音は、クリックされていなくても鳴らせるようにする
@@ -45,7 +45,7 @@ function createWindow() {
   win.webContents.on('console-message', (_event, _level, message) => {
     if (String(message).startsWith('[drag]')) console.log('[renderer]', message);
   });
-  win.loadFile('index.html');
+  win.loadFile('windows/index.html');
   // 起動する前や待ち時間中に時間が来ていたリマインダーは、読み込みが終わってから知らせる（notices.js）
   win.webContents.on('did-finish-load', () => state.events.emit('window-loaded'));
 

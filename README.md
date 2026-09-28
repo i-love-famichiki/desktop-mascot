@@ -139,6 +139,16 @@ npm run dist
 
 ## ファイル構成
 
+```
+main.js      メインプロセスの入口
+main/        メインプロセス（窓・メニュー・会話・設定の保存など）
+lib/         部品（Electron に頼らない計算や保存。test/ で確かめている）
+windows/     画面（豆の窓と設定の窓）
+assets/      トレイのアイコン
+build/       アプリのアイコンと、それを作るスクリプト
+test/        テスト（npm test）
+```
+
 | ファイル | 役割 |
 | --- | --- |
 | `main.js` | Electron のメインプロセスの入口。起動の順番だけを書き、中身は `main/` にある |
@@ -149,22 +159,22 @@ npm run dist
 | `main/reminders.js` / `main/notices.js` / `main/calendar-link.js` | タイマー・リマインダー・カレンダーの道具と、吹き出しで知らせるところ |
 | `main/settings-panel.js` / `main/sound-settings.js` / `main/autostart.js` / `main/sharing.js` | 設定ウィンドウを開くところと、各設定の保存 |
 | `main/dialogs.js` / `main/format.js` / `main/image-drop.js` | 確認の窓、日時の書き方、ドロップされた画像の受け取り |
-| `preload.js` / `renderer.js` / `index.html` / `style.css` | 画面側。マスコットの SVG（4 種類）と吹き出し |
-| `settings-window.html` / `settings-window.js` / `settings-preload.js` | 設定ウィンドウ |
-| `calendar.js` | Google カレンダーの予定の読み書きと、お知らせ・朝のまとめの文 |
-| `google-auth.js` | Google のログイン。長く使える鍵は Windows の safeStorage で暗号化して保存 |
-| `image-compress.js` | 画像を小さくする処理 |
-| `sounds.js` / `sound-player.js` | 鳴らす音の決め方と、実際に鳴らす処理 |
-| `history-store.js` | 会話履歴の保存と、古い会話の要約 |
-| `archive-store.js` | 会話の保管庫と、昔の会話を言葉で探す処理 |
-| `reminder-store.js` | タイマーとリマインダー |
-| `settings.js` | 設定の読み書き |
-| `sse.js` | Gemini からの返事を少しずつ受け取る処理 |
-| `tone.js` | 口調の 6 つのつまみと、プリセット |
-| `appraisal.js` | 相手の言葉から気持ちを判定して、毒舌の強さを決める |
-| `chat-tools.js` | 会話のたびに、使いそうな道具（タイマー・カレンダーなど）だけを選んで渡す |
-| `token-log.js` | 使ったトークンを日ごと・モデルごとに記録し、月の料金の目安を出す |
-| `api-key.js` | API キー。環境変数から読むか、設定画面に貼ったキーを暗号化して保存する |
+| `windows/preload.js` / `windows/renderer.js` / `windows/index.html` / `windows/style.css` | 画面側。マスコットの SVG（4 種類）と吹き出し |
+| `windows/settings-window.html` / `windows/settings-window.js` / `windows/settings-preload.js` | 設定ウィンドウ |
+| `lib/calendar.js` | Google カレンダーの予定の読み書きと、お知らせ・朝のまとめの文 |
+| `lib/google-auth.js` | Google のログイン。長く使える鍵は Windows の safeStorage で暗号化して保存 |
+| `lib/image-compress.js` | 画像を小さくする処理 |
+| `lib/sounds.js` / `windows/sound-player.js` | 鳴らす音の決め方と、実際に鳴らす処理 |
+| `lib/history-store.js` | 会話履歴の保存と、古い会話の要約 |
+| `lib/archive-store.js` | 会話の保管庫と、昔の会話を言葉で探す処理 |
+| `lib/reminder-store.js` | タイマーとリマインダー |
+| `lib/settings.js` | 設定の読み書き |
+| `lib/sse.js` | Gemini からの返事を少しずつ受け取る処理 |
+| `lib/tone.js` | 口調の 6 つのつまみと、プリセット |
+| `lib/appraisal.js` | 相手の言葉から気持ちを判定して、毒舌の強さを決める |
+| `lib/chat-tools.js` | 会話のたびに、使いそうな道具（タイマー・カレンダーなど）だけを選んで渡す |
+| `lib/token-log.js` | 使ったトークンを日ごと・モデルごとに記録し、月の料金の目安を出す |
+| `lib/api-key.js` | API キー。環境変数から読むか、設定画面に貼ったキーを暗号化して保存する |
 
 会話の履歴や設定は `data/` に保存され、Git には含めません。
 
