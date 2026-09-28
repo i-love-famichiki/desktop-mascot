@@ -1,6 +1,6 @@
 'use strict';
 
-// 設定ウィンドウの表示と操作。設定の保存はメインプロセス（main.js の settings:* ）が行う
+// 設定ウィンドウの表示と操作。設定の保存はメインプロセス（main/ の settings:* ）が行う
 
 const $ = (id) => document.getElementById(id);
 const openAtLoginEl = $('open-at-login');

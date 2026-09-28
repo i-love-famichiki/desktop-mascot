@@ -126,7 +126,14 @@ npm run dist
 
 | ファイル | 役割 |
 | --- | --- |
-| `main.js` | Electron のメインプロセス。ウィンドウ、Gemini API 呼び出し、システムプロンプト、タスクトレイ |
+| `main.js` | Electron のメインプロセスの入口。起動の順番だけを書き、中身は `main/` にある |
+| `main/state.js` | 設定・保存先・窓など、メインプロセスのあちこちで使うもの |
+| `main/mascot-window.js` / `main/menu.js` | マスコットの窓（出す・隠す・ドラッグ）と、タスクトレイ・右クリックのメニュー |
+| `main/chat.js` / `main/prompt.js` / `main/tools.js` / `main/gemini.js` | 会話。プロンプトを組み、道具を選び、Gemini API に送る |
+| `main/mood.js` | 口調のプリセットの切り替えと、気持ちの判定を返事に使うところ |
+| `main/reminders.js` / `main/notices.js` / `main/calendar-link.js` | タイマー・リマインダー・カレンダーの道具と、吹き出しで知らせるところ |
+| `main/settings-panel.js` / `main/sound-settings.js` / `main/autostart.js` / `main/sharing.js` | 設定ウィンドウを開くところと、各設定の保存 |
+| `main/dialogs.js` / `main/format.js` / `main/image-drop.js` | 確認の窓、日時の書き方、ドロップされた画像の受け取り |
 | `preload.js` / `renderer.js` / `index.html` / `style.css` | 画面側。マスコットの SVG（4 種類）と吹き出し |
 | `settings-window.html` / `settings-window.js` / `settings-preload.js` | 設定ウィンドウ |
 | `calendar.js` | Google カレンダーの予定の読み書きと、お知らせ・朝のまとめの文 |

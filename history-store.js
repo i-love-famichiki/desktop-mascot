@@ -116,7 +116,7 @@ class HistoryStore {
     this.saving = Promise.resolve();
     // ファイルはあるのに読めなかったときは、空の履歴で上書きしないよう保存を止める
     this.saveDisabled = false;
-    // 昔の会話として残さない発言か（設定の「昔の会話を覚える」を切っている間の発言。main.js が決める）。
+    // 昔の会話として残さない発言か（設定の「昔の会話を覚える」を切っている間の発言。main/state.js が決める）。
     // こうした発言は保管庫に入れず、日付が変わったら要約もせずに捨てる
     this.isEphemeral = () => false;
   }
