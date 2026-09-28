@@ -44,7 +44,7 @@ Gemini が吹き出しで返事をします。Windows 用・Electron 製。
 
 **AI とキー**
 - 天気やニュースは Google 検索で調べて、出典のサイト名も出す（設定で切れる）
-- 返事を作るモデルを、軽い（flash-lite）・かしこい（flash）から選べる
+- 返事を作るモデルを、Gemini 3.5 Flash Lite・3.5〜3.8 Flash・3.1 Pro Preview から選べる
 - API キーは、設定画面に貼るか、環境変数から読むかを選べる
 - 今月使った回数とトークンの数を設定画面で見られる
 
@@ -165,7 +165,7 @@ Electron や Gemini API に依存しない部分（履歴・保管庫・リマ�
 
 ## 作りについて
 
-- AI は Gemini API（`gemini-3.5-flash-lite`、設定で `gemini-3.5-flash` にも変えられる）。外部 SDK は使わず、Electron の
+- AI は Gemini API（`gemini-3.5-flash-lite`、設定でほかの Flash や Pro にも変えられる）。外部 SDK は使わず、Electron の
   `net.fetch` で `generateContent` を直接呼んでいます
 - `tools: [{ google_search: {} }]` を付け、検索するかどうかはモデルに任せています。
   検索つきで `429` が返ったとき（無料枠のキー）は、検索を外してやり直します

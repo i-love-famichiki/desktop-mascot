@@ -124,9 +124,20 @@ test('口調のプリセットも、保存したものを読み直せる（壊�
 
 test('AI モデルは、選べるものだけ（知らない名前なら軽いほうに戻す）', () => {
   const file = tempFile();
-  assert.deepEqual(GEMINI_MODELS.map((model) => model.id), ['gemini-3.5-flash-lite', 'gemini-3.5-flash']);
-  // 考えない lite に thinking を切る指定を送ると 400 になるので、どちらが考えるかを持たせてある
-  assert.deepEqual(GEMINI_MODELS.map((model) => model.thinking), [false, true]);
+  assert.deepEqual(GEMINI_MODELS.map((model) => model.id), [
+    'gemini-3.5-flash-lite',
+    'gemini-3.5-flash',
+    'gemini-3.6-flash',
+    'gemini-3.7-flash',
+    'gemini-3.8-flash',
+    'gemini-3.1-pro-preview',
+  ]);
+  // 考えるのを止められない lite と Pro に、止める指定を送ると 400 になるので、止められるかを持たせてある
+  assert.deepEqual(GEMINI_MODELS.map((model) => model.stopThinking), [false, true, true, true, true, false]);
+  // 選ぶときに確かめるのは、高い Pro だけ
+  assert.deepEqual(GEMINI_MODELS.filter((model) => model.expensive).map((model) => model.id), ['gemini-3.1-pro-preview']);
+  // 画面には Google の正式な名前を出す
+  for (const model of GEMINI_MODELS) assert.match(model.name, /^Gemini \d/);
 
   fs.writeFileSync(file, JSON.stringify({ geminiModel: 'gemini-3.5-flash' }));
   assert.equal(loadSettings(file).geminiModel, 'gemini-3.5-flash');

@@ -180,11 +180,11 @@ async function askGemini(
 /**
  * 1回のリクエストに付ける generationConfig。要らないときは null。
  * 内部で考えた分も出力として課金されるので、雑談では考えさせない。
- * 考えないモデル（lite）に thinkingConfig を送ると 400 になるので、考えるモデルにだけ付ける
+ * 止められないモデル（lite や Pro）に thinkingConfig を送ると 400 になるので、止められるモデルにだけ付ける
  */
 function generationConfig(schema) {
   const config = {
-    ...(currentModel().thinking && { thinkingConfig: { thinkingBudget: 0 } }),
+    ...(currentModel().stopThinking && { thinkingConfig: { thinkingBudget: 0 } }),
     // 決まった形で返してもらう。Google 検索や自作の道具と一緒に使っても問題ないことは確認済み
     ...(schema && { responseMimeType: 'application/json', responseSchema: schema }),
   };

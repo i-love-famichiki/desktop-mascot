@@ -8,6 +8,7 @@ const { app, BrowserWindow, ipcMain, screen, net } = require('electron');
 const path = require('path');
 const state = require('./state');
 const { currentModel } = require('./gemini');
+const { showDialog } = require('./dialogs');
 const { CALENDAR_MODES, CALENDAR_REFRESH_CHOICES, MASCOT_LOOKS, GEMINI_MODELS } = require('../settings');
 const { TONE_AXES, TONE_NG_ITEMS, TONE_NAME_MAX_CHARS, PLAIN_TONE_PRESET_INDEX, toneSteps } = require('../tone');
 const { soundChoices, SOUND_VOLUMES } = require('../sounds');
@@ -164,12 +165,25 @@ ipcMain.handle('settings:set-mascot-look', (event, id) => {
   return settingsState();
 });
 
-// 返事を作るモデル。次に話しかけるときから新しいモデルになる
-ipcMain.handle('settings:set-model', (event, id) => {
-  if (fromSettingsWindow(event) && GEMINI_MODELS.some((model) => model.id === id)) {
-    state.updateSettings({ geminiModel: id });
-    state.settingsChanged();
+// 返事を作るモデル。次に話しかけるときから新しいモデルになる。
+// 高いモデルは、うっかり選んだまま使い続けないよう、選んだときに確かめる
+ipcMain.handle('settings:set-model', async (event, id) => {
+  const model = GEMINI_MODELS.find((choice) => choice.id === id);
+  if (!fromSettingsWindow(event) || !model || model.id === state.settings.geminiModel) return settingsState();
+  if (model.expensive) {
+    const { response } = await showDialog({
+      type: 'warning',
+      buttons: ['使う', 'やめる'],
+      defaultId: 1,
+      cancelId: 1,
+      title: '高いモデルを使う',
+      message: `${model.name} を使いますか？`,
+      detail: 'このモデルは内部で考えるぶんを切れないので、料金がいちばん高く、返事も遅くなります。\n使い終わったら、Flash か Flash Lite に戻してください。',
+    });
+    if (response !== 0) return settingsState();
   }
+  state.updateSettings({ geminiModel: model.id });
+  state.settingsChanged();
   return settingsState();
 });
 

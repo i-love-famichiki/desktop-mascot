@@ -80,7 +80,10 @@ function render(state) {
   renderApiKey(state.apiKey);
 
   const { usage } = state;
+  // 高いモデルのままになっていても気づけるよう、今のモデルも並べて出す
+  const modelName = state.model.choices.find((choice) => choice.id === state.model.id)?.name ?? state.model.id;
   usageSummaryEl.textContent =
+    `今のモデル: ${modelName}\n` +
     `${usage.month}: ${usage.requests.toLocaleString()} 回（今日 ${usage.todayRequests.toLocaleString()} 回）` +
     `・検索 ${usage.searches.toLocaleString()} 回（月 ${usage.searchFree.toLocaleString()} 回まで無料）\n` +
     `トークン ${(usage.sentTokens + usage.replyTokens).toLocaleString()}（送った分 ${usage.sentTokens.toLocaleString()}・返事 ${usage.replyTokens.toLocaleString()}）`;

@@ -27,13 +27,23 @@ const CALENDAR_MODES = Object.freeze([
 // カレンダーの予定を読み直す間隔（分）として選べる値。短いほど早く気づくが、その分 Google への問い合わせが増える
 const CALENDAR_REFRESH_CHOICES = Object.freeze([5, 15, 30, 60]);
 
-// 返事を作る AI モデル。thinking は「モデルが内部で考えた分」で、出力として課金される。
-// lite は考えないので、切る指定（thinkingBudget）を送ると 400 になる。実測:
-//   flash-lite …「1+1は？」で 考えた分 0 / thinkingBudget を送ると 400
-//   flash      …「1+1は？」で 考えた分 53 / thinkingBudget: 0 で 0 になる
+// 返事を作る AI モデル。name は Google の正式な名前（画面にそのまま出す）。
+// 「モデルが内部で考えた分」は出力として課金されるので、止められるモデルは止める（stopThinking で
+// thinkingBudget: 0 を送る）。止められないモデルに送ると 400 になるので送らない。
+// 載せるのは、会話・道具（タイマー）・Google 検索・決まった形の答え（気持ちの判定）の4つが通ったものだけ。
+// 2026-09-28 の実測:
+//   3.5 Flash Lite …考えた分 0（もともと考えない）/ thinkingBudget を送ると 400
+//   3.5〜3.8 Flash …thinkingBudget: 0 で 考えた分 0（3.7 だけ 28 ほど残る）
+//   3.1 Pro Preview …「考えないと動かない」と言われ、thinkingBudget: 0 は 400。そのぶん高く遅い
+//   2.5 Flash / 2.5 Pro …「新しく使う人には提供終了」で 404（載せない）
 const GEMINI_MODELS = Object.freeze([
-  { id: 'gemini-3.5-flash-lite', name: '軽い（flash-lite）', thinking: false },
-  { id: 'gemini-3.5-flash', name: 'かしこい（flash）', thinking: true },
+  { id: 'gemini-3.5-flash-lite', name: 'Gemini 3.5 Flash Lite（軽い・安い）', stopThinking: false },
+  { id: 'gemini-3.5-flash', name: 'Gemini 3.5 Flash', stopThinking: true },
+  { id: 'gemini-3.6-flash', name: 'Gemini 3.6 Flash', stopThinking: true },
+  { id: 'gemini-3.7-flash', name: 'Gemini 3.7 Flash', stopThinking: true },
+  { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash（いちばん新しい）', stopThinking: true },
+  // expensive: 選んだときに確かめる（うっかり高いモデルのまま使い続けないように）
+  { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro Preview（高い・遅い）', stopThinking: false, expensive: true },
 ]);
 
 // 豆の見た目。index.html にこの名前の絵（data-look）が置いてある
