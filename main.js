@@ -4,7 +4,7 @@
 //   state.js          設定・保存先・窓など、あちこちで使うもの
 //   mascot-window.js  マスコットの窓（出す・隠す・ドラッグ・高さ合わせ）
 //   menu.js           タスクトレイと右クリックのメニュー
-//   settings-panel.js 設定ウィンドウ（sound-settings / autostart / sharing / calendar-link / mood も設定の操作を持つ）
+//   settings-panel.js 設定ウィンドウ（sound-settings / autostart / sharing / calendar-link も設定の操作を持つ）
 //   chat.js           会話（prompt.js でプロンプトを組み、tools.js の道具を渡し、gemini.js で送る）
 //   reminders.js      タイマーとリマインダー（知らせる文は notices.js が出す）
 

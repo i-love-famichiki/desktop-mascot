@@ -10,7 +10,6 @@ const state = require('./state');
 const { currentModel } = require('./gemini');
 const { showDialog } = require('./dialogs');
 const { CALENDAR_MODES, CALENDAR_REFRESH_CHOICES, MASCOT_LOOKS, GEMINI_MODELS } = require('../lib/settings');
-const { TONE_AXES, TONE_NG_ITEMS, TONE_NAME_MAX_CHARS, PLAIN_TONE_PRESET_INDEX, toneSteps } = require('../lib/tone');
 const { soundChoices, SOUND_VOLUMES } = require('../lib/sounds');
 const { monthUsage, SEARCH_FREE_PER_MONTH } = require('../lib/token-log');
 const { ApiKeyStore, SAVED_SOURCE, DEFAULT_SOURCE } = require('../lib/api-key');
@@ -78,18 +77,6 @@ function settingsState() {
     keepPast: settings.keepPast,
     apiKey: apiKeyState(),
     usage: usageState(),
-    tone: {
-      index: settings.tonePresetIndex,
-      presets: settings.tonePresets.map((preset) => ({ name: preset.name, axes: { ...preset.axes } })),
-      // つまみの説明と、止まる所（段）は tone.js が持っている。
-      // Gemini に渡す文そのもの（levels の例文や caveat）は画面に出さないので渡さない
-      axes: TONE_AXES.map((axis) => ({ id: axis.id, name: axis.name, note: axis.note, steps: toneSteps(axis) })),
-      // このプリセットだけは、つまみを使わない（今までの口調のまま）
-      plainIndex: PLAIN_TONE_PRESET_INDEX,
-      nameMaxChars: TONE_NAME_MAX_CHARS,
-      // つまみをどこまで上げてもしないこと（画面に並べて見せる）
-      ngItems: [...TONE_NG_ITEMS],
-    },
     sound: {
       choices: soundChoices(),
       volume: settings.soundVolume,

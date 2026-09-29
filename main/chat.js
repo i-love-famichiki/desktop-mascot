@@ -7,7 +7,6 @@ const state = require('./state');
 const { askGemini, describeError } = require('./gemini');
 const { buildSystemPrompt, buildContents } = require('./prompt');
 const { toolGroups, chatFunctions } = require('./tools');
-const { usingAppraisal, judgeAppraisal, recordMood } = require('./mood');
 const { clip } = require('./format');
 
 // 1回の発言も長すぎると文脈を圧迫するので上限を設けておく
@@ -48,17 +47,13 @@ ipcMain.handle('chat:history', () => ({
 async function chat(userText, onDelta) {
   try {
     const groups = toolGroups(userText);
-    // 先に感情だけを判定し、その結果で毒舌の指示を差し替えてから返事を書かせる。
-    // 同じ呼び出しで両方やらせると、判定が 0 でも口調の指示に引っぱられて刺してしまう（appraisal.js）
-    const appraisal = usingAppraisal() ? await judgeAppraisal(userText) : null;
     const { text, sources, searchSuggestions } = await askGemini(buildContents(state.store.messages, userText), {
       onDelta,
-      systemPrompt: buildSystemPrompt(groups, appraisal),
+      systemPrompt: buildSystemPrompt(groups),
       tools: state.settings.webSearch ? [{ google_search: {} }] : [],
-      searchRefusedPrompt: () => buildSystemPrompt(groups, appraisal, 'refused'),
+      searchRefusedPrompt: () => buildSystemPrompt(groups, 'refused'),
       functions: chatFunctions(groups),
     });
-    if (appraisal && !appraisal.failed) recordMood(appraisal);
     // 返事を表示するのに保存の完了は待たない（失敗しても store 側でログに出す）
     state.store.append(
       { role: 'user', content: userText, at: Date.now() },

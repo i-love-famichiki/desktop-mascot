@@ -6,7 +6,6 @@
 const { net } = require('electron');
 const state = require('./state');
 const { GEMINI_MODELS } = require('../lib/settings');
-const { tonePromptLines } = require('../lib/tone');
 const { createSseParser } = require('../lib/sse');
 const { localDateKey } = require('../lib/calendar');
 
@@ -59,14 +58,8 @@ function logTokens(chunks) {
 
 /** 入力の何が長いのかを、文字数で見る（トークンではないが、削る所を探すには十分） */
 function logPromptParts(systemPrompt, contents) {
-  // 要約のときは口調を入れないので、入っている回だけ数える
-  const tone = tonePromptLines(state.settings.tonePresets, state.settings.tonePresetIndex).join('\n');
-  const toneChars = systemPrompt.includes('【まめの口調設定】') ? tone.length : 0;
   const talkChars = JSON.stringify(contents).length;
-  console.log(
-    `[tokens] 入力の中身（文字数）: システム ${systemPrompt.length}`,
-    `（うち口調 ${toneChars}）／ 送った会話 ${talkChars}`,
-  );
+  console.log(`[tokens] 入力の中身（文字数）: システム ${systemPrompt.length} ／ 送った会話 ${talkChars}`);
 }
 
 // タイマーの登録や昔の会話探しで、道具を使う → 結果を返す、を繰り返す回数の上限

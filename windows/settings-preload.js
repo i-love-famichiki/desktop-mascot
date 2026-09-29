@@ -21,9 +21,6 @@ contextBridge.exposeInMainWorld('settingsApi', {
   setKeepPast: (enabled) => ipcRenderer.invoke('settings:set-keep-past', enabled),
   setWebSearch: (enabled) => ipcRenderer.invoke('settings:set-web-search', enabled),
   setSound: (slot, id) => ipcRenderer.invoke('settings:set-sound', slot, id),
-  selectTonePreset: (index) => ipcRenderer.invoke('settings:select-tone-preset', index),
-  setToneAxis: (index, axisId, value) => ipcRenderer.invoke('settings:set-tone-axis', index, axisId, value),
-  renameTonePreset: (index, name) => ipcRenderer.invoke('settings:rename-tone-preset', index, name),
   setSoundVolume: (id) => ipcRenderer.invoke('settings:set-sound-volume', id),
   chooseSoundFile: (slot) => ipcRenderer.invoke('settings:choose-sound-file', slot),
   // 試し聞き用。豆の窓と同じものを鳴らす

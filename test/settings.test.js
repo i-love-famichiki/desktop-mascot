@@ -8,18 +8,13 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { DEFAULT_SETTINGS, CALENDAR_MODES, CALENDAR_REFRESH_CHOICES, MASCOT_LOOKS, GEMINI_MODELS, loadSettings, saveSettings } = require('../lib/settings');
-const { DEFAULT_TONE_PRESETS, normalizeTonePresets } = require('../lib/tone');
-
-// 口調のプリセットは長いので、ここでは tone.js の初期値をそのまま使う（中身は test/tone.test.js）
-const tone = () => ({
+// 下の比べる値に毎回書くと長いので、AI まわりの初期値はまとめておく
+const aiDefaults = () => ({
   geminiModel: 'gemini-3.5-flash-lite',
   apiKeySource: 'env:GEMINI_API_KEY',
   keepPast: true,
   keepPastOffAt: 0,
   webSearch: true,
-  tonePresetIndex: 0,
-  tonePresets: normalizeTonePresets(DEFAULT_TONE_PRESETS),
-  toneChangedAt: 0,
 });
 
 function tempFile() {
@@ -28,7 +23,7 @@ function tempFile() {
 }
 
 test('ファイルが無ければ初期値（自動起動は ON）', () => {
-  assert.deepEqual(loadSettings(tempFile()), { openAtLogin: true, historyFolder: '', lastShareParent: '', calendarMode: 'off', calendarRefreshMinutes: 15, notifySound: 'chime', replySound: 'pop', soundVolume: 'medium', notifySoundFile: '', replySoundFile: '', mascotLook: 'smooth', ...tone() });
+  assert.deepEqual(loadSettings(tempFile()), { openAtLogin: true, historyFolder: '', lastShareParent: '', calendarMode: 'off', calendarRefreshMinutes: 15, notifySound: 'chime', replySound: 'pop', soundVolume: 'medium', notifySoundFile: '', replySoundFile: '', mascotLook: 'smooth', ...aiDefaults() });
   assert.equal(DEFAULT_SETTINGS.openAtLogin, true);
 });
 
@@ -46,8 +41,7 @@ test('保存した設定を読み直せる（OFF にしたら OFF のまま）',
     notifySoundFile: '',
     replySoundFile: '',
     mascotLook: 'smooth',
-    ...tone(),
-    tonePresetIndex: 2,
+    ...aiDefaults(),
   });
   assert.deepEqual(loadSettings(file), {
     openAtLogin: false,
@@ -61,24 +55,23 @@ test('保存した設定を読み直せる（OFF にしたら OFF のまま）',
     notifySoundFile: '',
     replySoundFile: '',
     mascotLook: 'smooth',
-    ...tone(),
-    tonePresetIndex: 2,
+    ...aiDefaults(),
   });
 });
 
 test('先頭に BOM が付いたファイルも読める（メモ帳や PowerShell で保存した場合）', () => {
   const file = tempFile();
   fs.writeFileSync(file, '﻿{ "openAtLogin": false }', 'utf8');
-  assert.deepEqual(loadSettings(file), { openAtLogin: false, historyFolder: '', lastShareParent: '', calendarMode: 'off', calendarRefreshMinutes: 15, notifySound: 'chime', replySound: 'pop', soundVolume: 'medium', notifySoundFile: '', replySoundFile: '', mascotLook: 'smooth', ...tone() });
+  assert.deepEqual(loadSettings(file), { openAtLogin: false, historyFolder: '', lastShareParent: '', calendarMode: 'off', calendarRefreshMinutes: 15, notifySound: 'chime', replySound: 'pop', soundVolume: 'medium', notifySoundFile: '', replySoundFile: '', mascotLook: 'smooth', ...aiDefaults() });
 });
 
 test('壊れたファイル・型の違う値は初期値で補う', () => {
   const file = tempFile();
   fs.writeFileSync(file, '{ こわれている');
-  assert.deepEqual(loadSettings(file), { openAtLogin: true, historyFolder: '', lastShareParent: '', calendarMode: 'off', calendarRefreshMinutes: 15, notifySound: 'chime', replySound: 'pop', soundVolume: 'medium', notifySoundFile: '', replySoundFile: '', mascotLook: 'smooth', ...tone() });
+  assert.deepEqual(loadSettings(file), { openAtLogin: true, historyFolder: '', lastShareParent: '', calendarMode: 'off', calendarRefreshMinutes: 15, notifySound: 'chime', replySound: 'pop', soundVolume: 'medium', notifySoundFile: '', replySoundFile: '', mascotLook: 'smooth', ...aiDefaults() });
 
   fs.writeFileSync(file, JSON.stringify({ openAtLogin: 'no', historyFolder: 3, unknown: 1 }));
-  assert.deepEqual(loadSettings(file), { openAtLogin: true, historyFolder: '', lastShareParent: '', calendarMode: 'off', calendarRefreshMinutes: 15, notifySound: 'chime', replySound: 'pop', soundVolume: 'medium', notifySoundFile: '', replySoundFile: '', mascotLook: 'smooth', ...tone() });
+  assert.deepEqual(loadSettings(file), { openAtLogin: true, historyFolder: '', lastShareParent: '', calendarMode: 'off', calendarRefreshMinutes: 15, notifySound: 'chime', replySound: 'pop', soundVolume: 'medium', notifySoundFile: '', replySoundFile: '', mascotLook: 'smooth', ...aiDefaults() });
 });
 
 test('予定を読み直す間隔は、選べる値以外なら初期値（15分）にする', () => {
@@ -108,18 +101,12 @@ test('豆の見た目は、index.html にある絵の名前だけ', () => {
   }
 });
 
-test('口調のプリセットも、保存したものを読み直せる（壊れていれば初期値で補う）', () => {
+// 口調のプリセットは 2026-09-29 に廃止した。前の版で保存した設定ファイルにも残っているので、読んだら捨てる
+test('前の版の口調の設定が残っていても、読み込みでは捨てる', () => {
   const file = tempFile();
-  const presets = normalizeTonePresets([{ name: 'いつもの まめ' }, { name: '毒舌', axes: { sharp: 8 } }]);
-
-  saveSettings(file, { ...DEFAULT_SETTINGS, tonePresetIndex: 1, tonePresets: presets });
-  assert.equal(loadSettings(file).tonePresetIndex, 1);
-  assert.deepEqual(loadSettings(file).tonePresets, presets);
-
-  // プリセットが無い・壊れている・番号が範囲の外なら、初期値と1番目に戻す
-  fs.writeFileSync(file, JSON.stringify({ tonePresets: 'こわれている', tonePresetIndex: 9 }));
-  assert.deepEqual(loadSettings(file).tonePresets, tone().tonePresets);
-  assert.equal(loadSettings(file).tonePresetIndex, 0);
+  fs.writeFileSync(file, JSON.stringify({ tonePresetIndex: 1, tonePresets: [{ name: '毒舌' }], toneChangedAt: 123 }));
+  const settings = loadSettings(file);
+  for (const key of ['tonePresetIndex', 'tonePresets', 'toneChangedAt']) assert.ok(!(key in settings), key);
 });
 
 test('AI モデルは、選べるものだけ（知らない名前なら軽いほうに戻す）', () => {

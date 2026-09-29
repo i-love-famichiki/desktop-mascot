@@ -199,53 +199,6 @@
         border-radius: 6px;
         background: #fff;
       }
-
-      /* 口調のつまみ。名前・スライダー・今の数値を横に並べる */
-      .axis {
-        display: grid;
-        grid-template-columns: 6.5em 1fr 2.4em;
-        align-items: center;
-        gap: 8px;
-        margin-top: 12px;
-      }
-
-      .axis-name {
-        font-size: 13px;
-      }
-
-      .axis-value {
-        text-align: right;
-        font-variant-numeric: tabular-nums;
-      }
-
-      /* 今の段の話し方。つまみを動かすと、その場で書き換わる */
-      .axis-note {
-        grid-column: 2 / -1;
-        margin: -2px 0 0;
-        color: var(--accent);
-        font-size: 12px;
-      }
-
-      input[type="range"] {
-        width: 100%;
-        margin: 0;
-        accent-color: var(--accent);
-        cursor: pointer;
-      }
-
-      /* どんな数値でもしないこと（tone.js の決まりをそのまま並べる） */
-      #tone-ng {
-        margin: 0;
-        padding-left: 1.2em;
-        color: var(--muted);
-        font-size: 12px;
-      }
-
-      input[type="range"]:disabled {
-        cursor: default;
-        filter: grayscale(1);
-        opacity: 0.5;
-      }
     </style>
   </head>
   <body>
@@ -253,7 +206,6 @@
 
     <div class="tabs" role="tablist">
       <button id="tab-basic" type="button" role="tab" data-panel="panel-basic" aria-selected="true">基本</button>
-      <button id="tab-tone" type="button" role="tab" data-panel="panel-tone" aria-selected="false">口調</button>
       <button id="tab-ai" type="button" role="tab" data-panel="panel-ai" aria-selected="false">KEY</button>
     </div>
 
@@ -373,37 +325,6 @@
       </section>
     </div>
 
-    <div id="panel-tone" class="panel" hidden>
-      <section class="item">
-        <h2>口調のプリセット</h2>
-        <p>まめの話し方を、6つのつまみで決めます。5つまで保存でき、ここで選んだものが次の返事から使われます。</p>
-        <div class="row">
-          <select id="tone-preset"></select>
-        </div>
-
-        <div class="sub">
-          <div class="sub-title">このプリセットの名前</div>
-          <div class="row">
-            <input id="tone-name" type="text" />
-          </div>
-        </div>
-
-        <div class="sub">
-          <div class="sub-title">つまみ</div>
-          <div id="tone-plain-note" class="note" hidden>
-            このプリセットは、今までのまめの口調そのままです。つまみは使いません（動かしたいときは、ほかのプリセットを選んでください）。
-          </div>
-          <div id="tone-axes"></div>
-        </div>
-      </section>
-
-      <section class="item">
-        <h2>どんな数値でもしないこと</h2>
-        <p>つまみをどこまで上げても、次のことはしません。</p>
-        <ul id="tone-ng"></ul>
-      </section>
-    </div>
-
     <div id="panel-ai" class="panel" hidden>
       <section class="item">
         <h2>API キー</h2>
@@ -441,14 +362,14 @@
         </div>
         <div class="note">
           <b>無料枠のキーの制限</b>（2026-09 時点）: 返事に 20〜30 秒かかり、混んでいると時間切れになることがあります。
-          Google 検索は使えません（天気やニュースは調べられません）。口調も反映されにくくなります（相手の言葉を見て毒舌や気持ちの出し方を決める判定が、混んでいて失敗しやすいため）。
+          Google 検索は使えません（天気やニュースは調べられません）。
           快適に使うには、Google Cloud で支払い設定をした有料枠のキーがおすすめです。
         </div>
       </section>
 
       <section class="item">
         <h2>AI モデル</h2>
-        <p>返事を作る AI です。Flash Lite は安くて速い分、口調の指示に従いきれないことがあります。Flash は口調の指示によく従いますが、料金が高くなります。</p>
+        <p>返事を作る AI です。Flash Lite は安くて速いモデルです。Flash は込み入った質問に強い分、料金が高くなります。</p>
         <div class="row">
           <select id="gemini-model"></select>
         </div>

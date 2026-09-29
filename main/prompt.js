@@ -3,12 +3,9 @@
 // 会話で Gemini に渡すもの（システムプロンプトと、今日の会話）を組み立てる
 
 const state = require('./state');
-const { describeElapsed, formatMessageTime, localIsoString, clip } = require('./format');
-const { usingTonePreset, toneChangedToday } = require('./mood');
+const { describeElapsed, formatMessageTime, localIsoString } = require('./format');
 const { reminderPromptLines } = require('./reminders');
 const { CALENDAR_IDLE_LINES, calendarInChat, calendarPromptLines, calendarUnavailableLines } = require('./calendar-link');
-const { tonePromptLines } = require('../lib/tone');
-const { emotionPromptLines } = require('../lib/appraisal');
 
 // 送る会話履歴の上限（今日の直近20往復まで）。昨日より前の会話は、システムプロンプトに短く入れる
 const HISTORY_MAX_TURNS = 20;
@@ -20,7 +17,6 @@ const HISTORY_MAX_TURNS = 20;
 // 日付は話しかけるたびに入れ直す（モデルは今日が何日か知らない）。
 function buildSystemPrompt(
   groups = { timer: true, history: true, calendar: calendarInChat(), pastDays: true },
-  appraisal = null,
   search = state.settings.webSearch ? 'on' : 'off',
 ) {
   const { settings } = state;
@@ -39,12 +35,7 @@ function buildSystemPrompt(
     'ユーザーの発言の先頭にある [9月16日 21:33] のような表記は、その発言をした日時です。',
     '「さっき」「朝に話した」などの時間の感覚に使ってください。返事には、この日時の表記を付けないでください。',
     '名前はまだありません。ユーザーが名前をくれたら喜んで受け取ってください。',
-    // 口調のプリセットを使っているときは、ここで口調を決めない（決めると、下の【まめの口調設定】と
-    // 引っぱり合って毒舌などが弱まる）。絵文字を使わないことだけは、どちらでも守らせる
-    ...(usingTonePreset() ? ['絵文字は使いません。'] : ['口調は親しみやすく、少しだけ子どもっぽく、絵文字は使いません。']),
-    // 渡した会話の中の、前の返事の口調に引っぱられて、口調を切り替えても変わらなかったので言い添える
-    '下の会話にある、あなたの前の返事の口調はまねしないでください。口調を途中で変えることがあるので、いつも今ここに書いた口調で話してください。',
-    ...toneChangedPromptLines(),
+    '口調は親しみやすく、少しだけ子どもっぽく、絵文字は使いません。',
     '返事は必ず日本語で、基本は2〜3文の短さに収めてください。画面の小さな吹き出しに表示されます。',
     // 道具の使い方は、その道具を渡す回にだけ書く（渡していない道具の話を書くと、
     // 持っていない道具を使ったつもりで返事をしてしまう）
@@ -61,12 +52,6 @@ function buildSystemPrompt(
       : []),
     ...(!settings.keepPast ? NO_PAST_LINES : groups.pastDays ? pastDaysPromptLines() : PAST_DAYS_IDLE_LINES),
     ...(settings.keepPast ? memoryPromptLines() : []),
-    // 口調の指示は一番最後に置く。中の「絶対的NGライン」が、ほかの指示に上書きされにくいようにするため
-    // （1番目のプリセットのときは何も足さないので、今までと同じプロンプトになる）
-    // 感情の評価をした回は、毒舌強度をその回の値に差し替えて渡す（刺す理由がなければ 0）。
-    // プリセットの値をそのまま書くと、判定が 0 でも「毒舌強度9 = 見下しも隠さない」に引っぱられる
-    ...tonePromptLines(settings.tonePresets, settings.tonePresetIndex, appraisal?.sharpness ?? null),
-    ...(appraisal ? emotionPromptLines(appraisal) : []),
   ].join('\n');
 }
 
@@ -131,44 +116,11 @@ function memoryPromptLines() {
   ];
 }
 
-// 口調を変える前の会話を、メモとして渡すときの上限（文字数）
-const BEFORE_TONE_CHANGE_MAX_CHARS = 2000;
-// そのメモの中の、まめの返事1つあたりの上限。言い回しまで渡すと口調が移るので、中身が分かる程度に切る
-const BEFORE_TONE_CHANGE_REPLY_CHARS = 60;
-
-/**
- * 今日の会話の途中で口調を変えたときの、変える前の会話のメモ。
- * 変える前の返事を会話として渡すと、何往復しても前の口調に引っぱられたので、
- * 会話（contents）からは外し、中身だけをここで伝える（buildContents）
- */
-function toneChangedPromptLines() {
-  const changedAt = toneChangedToday();
-  if (!changedAt) return [];
-  const before = state.store.messages
-    .filter((message) => message.at >= new Date().setHours(0, 0, 0, 0) && message.at < changedAt)
-    .slice(-HISTORY_MAX_TURNS * 2)
-    .map((message) =>
-      message.role === 'user'
-        ? `[${formatMessageTime(message.at)}] ユーザー: ${message.content}`
-        : `あなた: ${clip(message.content.replace(/\s+/g, ' '), BEFORE_TONE_CHANGE_REPLY_CHARS)}`,
-    );
-  if (before.length === 0) return [];
-  return [
-    '',
-    `[${formatMessageTime(changedAt)}] に口調を変えました。それより前の今日の会話は、下のメモだけです（あなたの返事は途中で切ってあります）。`,
-    '話の中身は覚えておいてください。ただし前の口調・言い回しは、まねしないでください。',
-    '---',
-    clip(before.join('\n'), BEFORE_TONE_CHANGE_MAX_CHARS),
-    '---',
-  ];
-}
-
 /** 今日の直近の会話に新しい発言を足して、Gemini に送る contents の形にする */
 // ユーザーの発言にだけ、話した日時を先頭に付けて送る（保存している会話には付けない）。
 // まめの返事に付けると、まねして返事に日時を書き始めることがあるので付けない
 function buildContents(pastMessages, userText) {
-  // 今日口調を変えていたら、それより前の会話は送らない（中身はシステムプロンプトのメモで渡す）
-  const since = Math.max(new Date().setHours(0, 0, 0, 0), toneChangedToday());
+  const since = new Date().setHours(0, 0, 0, 0);
   const withTime = (text, at) => `[${formatMessageTime(at)}] ${text}`;
   return [
     ...pastMessages

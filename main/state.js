@@ -9,7 +9,6 @@ const path = require('path');
 const { HistoryStore } = require('../lib/history-store');
 const { ReminderStore } = require('../lib/reminder-store');
 const { loadSettings, saveSettings } = require('../lib/settings');
-const { MoodLog } = require('../lib/appraisal');
 const { TokenLog } = require('../lib/token-log');
 const { ApiKeyStore } = require('../lib/api-key');
 const { GoogleAuth } = require('../lib/google-auth');
@@ -95,12 +94,6 @@ state.apiKeys = new ApiKeyStore({
 state.calendar = new Calendar({ auth: state.googleAuth, fetch: (...args) => net.fetch(...args) });
 // 朝のまとめを最後に言った日。PC ごとに覚えておく
 state.calendarStateFile = path.join(googleDir, 'calendar-state.json');
-
-// 直近の感情（感情の引きずり）。会話履歴とは別のファイルで、この PC の中にだけ置く。
-// テストのときは MASCOT_MOOD_FILE で差し替えられる
-state.moodLog = new MoodLog(
-  process.env.MASCOT_MOOD_FILE ? path.resolve(process.env.MASCOT_MOOD_FILE) : path.join(dataDir, 'mood.json'),
-);
 
 // 使ったトークンの記録。この PC の中に置く（共有フォルダには置かない）。
 // テストのときは MASCOT_TOKEN_LOG_FILE で差し替えられる
